@@ -16,6 +16,7 @@ from dataLoader import Split_data, DataLoader
 from Metrics import Metrics, KTLoss
 from HGAT import MSHGAT
 from Optim import ScheduledOptim
+from utils import gain_test_model
 
 torch.backends.cudnn.deterministic = True
 torch.manual_seed(0)
@@ -206,7 +207,7 @@ def test_epoch(model, validation_data, graph, hypergraph_list, kt_loss, k_list=[
 
             # forward
             # pred = model(tgt, tgt_timestamp, tgt_idx, ans, graph, hypergraph_list)
-            pred, pred_res, kt_mask = model(tgt, tgt_timestamp, tgt_idx, ans, graph,
+            pred, pred_res, kt_mask, yt = model(tgt, tgt_timestamp, tgt_idx, ans, graph,
                                             hypergraph_list)  # ==================================
             y_pred = pred.detach().cpu().numpy()
             loss_kt, auc, acc = kt_loss(pred_res.cpu(), ans.cpu(),
@@ -257,6 +258,7 @@ def test_model(MSHGAT, data_path):
 
 if __name__ == "__main__":
     model = MSHGAT
-    train_model(model, opt.data_name)
+    # train_model(model, opt.data_name)
     # test_model(model, opt.data_name)
-    # test_model(model, opt.data_name)
+    # gain_test_model(model, opt.data_name, opt)
+    gain_test_model(model, opt.data_name, opt)
