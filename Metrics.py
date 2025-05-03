@@ -72,6 +72,38 @@ class Metrics(object):
         # 	return 0.0
         return score / min(len(actual), k)
 
+    def compute_effectiveness(self, yt_before, yt_after, topk_indices):
+        """
+        修改后的有效性计算（逐时间步独立计算）
+        输入维度说明：
+        yt_before: [B, seq_len, num_skills]
+        yt_after: [B, seq_len, K, num_skills]（每个时间步插入后的知识状态）
+        topk_indices: [B, seq_len, K]
+        """
+        batch_size, seq_len, K = topk_indices.shape
+        total_gain = 0.0
+        valid_count = 0
+
+        for b in range(batch_size):
+            for t in range(seq_len):
+                recommended = topk_indices[b, t].tolist()
+                valid_rec = [r for r in recommended if 0 <= r < yt_before.shape[2]]
+                if not valid_rec:
+                    continue
+
+                # 原始知识状态（当前时间步）
+                pb = yt_before[b, t, valid_rec].mean().item()
+                # 插入后的知识状态（仅当前时间步的推荐）
+                pa = yt_after[b, t, :len(valid_rec), valid_rec].mean().item()
+
+                if pb < 1.0 - 1e-6:
+                    gain = (pa - pb) / (1.0 - pb)
+                    total_gain += gain
+                    valid_count += 1
+
+        return total_gain / valid_count if valid_count > 0 else 0.0
+
+
     def compute_metric(self, y_prob, y_true, k_list=[10, 50, 100]):
         '''
             y_true: (#samples, )
@@ -95,13 +127,94 @@ class Metrics(object):
         scores = {k: np.mean(v) for k, v in scores.items()}
         return scores, scores_len
 
-    def get_courses_by_video(self, video_name, course_video_mapping):
-        """根据视频名称获取其所属的课程"""
-        courses = []
-        for course, videos in course_video_mapping.items():
-            if video_name in videos:
-                courses.append(course)
-        return courses
+    # Metrics.py 的 compute_effectiveness 方法
+    def compute_effectiveness(self, yt_before, yt_after, inserted_lengths, topk_indices):
+        """
+        有效性计算（独立处理每个推荐资源）
+        输入维度说明：
+        yt_before: [B, seq_len, num_skills]（原始知识状态）
+        yt_after: [B, seq_len-1, num_skills]（每个时间步插入后的最终知识状态）
+        topk_indices: [B, seq_len-1, K]
+        """
+        batch_size, seq_len_minus_1, K = topk_indices.shape
+        total_gain = 0.0
+        valid_count = 0
+
+        for b in range(batch_size):
+            for t in range(seq_len_minus_1):
+                recommended = topk_indices[b, t].tolist()
+                valid_rec = [r for r in recommended if 0 <= r < yt_before.shape[2]]
+                if not valid_rec:
+                    continue
+
+                # 原始知识状态（时间步t）
+                pb_values = yt_before[b, t, valid_rec]  # [K_valid]
+                # 插入后的知识状态（时间步t+K）
+                pa_values = yt_after[b, t, valid_rec]  # [K_valid]
+
+                for k in range(len(valid_rec)):
+                    pb = pb_values[k].item()
+                    pa = pa_values[k].item()
+                    if pb < 1.0 - 1e-6:
+                        gain = (pa - pb) / (1.0 - pb)
+                        total_gain += gain
+                        valid_count += 1
+
+        return total_gain / valid_count if valid_count > 0 else 0.0
+
+    def gaintest_compute_metric(self, y_prob, y_true, batch_size, seq_len, k_list=[10, 50, 100], topnum=None):
+        # 初始化所有指标
+        scores = {'hits@' + str(k): 0.0 for k in k_list}
+        scores.update({'map@' + str(k): 0.0 for k in k_list})
+        valid_samples = 0
+
+        # 预初始化 detailed_results，确保长度与 total_samples 一致
+        total_samples = batch_size * (seq_len - 1)
+        detailed_results = [{'topk_resources': [], 'hits': 0.0} for _ in range(total_samples)]
+
+        for i in range(total_samples):
+            p_ = y_prob[i]
+            y_ = y_true[i]
+            if y_ == self.PAD:
+                continue  # 保持预初始化的空列表
+
+            valid_samples += 1
+            p_sort = p_.argsort()
+            topk = p_sort[-topnum:][::-1] if topnum else p_sort[-5:][::-1]
+
+            # 直接更新 detailed_results 的对应位置
+            detailed_results[i]['topk_resources'] = topk.tolist()
+            detailed_results[i]['hits'] = 1.0 if y_ in topk else 0.0
+
+            # 计算 hits@k 和 map@k
+            for k in k_list:
+                hits = 1.0 if y_ in p_sort[-k:][::-1] else 0.0
+                scores['hits@' + str(k)] += hits
+                scores['map@' + str(k)] += self.apk([y_], p_sort[-k:][::-1], k)
+
+        # 归一化为均值
+        for k in k_list:
+            if valid_samples > 0:
+                scores['hits@' + str(k)] /= valid_samples
+                scores['map@' + str(k)] /= valid_samples
+            else:
+                scores['hits@' + str(k)] = 0.0
+                scores['map@' + str(k)] = 0.0
+
+        # 生成 topk_sequence
+        topk_sequence = []
+        for b in range(batch_size):
+            seq = []
+            for t in range(seq_len - 1):
+                idx = b * (seq_len - 1) + t
+                if idx < len(detailed_results):
+                    seq.append(detailed_results[idx]['topk_resources'][:topnum])
+                else:
+                    seq.append([])
+            topk_sequence.append(seq)
+
+        return scores, topk_sequence, valid_samples
+
 
 # Calculate accuracy of prediction result and its corresponding label
 # output: tensor, labels: tensor
@@ -137,3 +250,4 @@ class KTLoss(nn.Module):
 
         return loss, auc, acc
 
+########
