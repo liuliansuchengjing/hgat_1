@@ -17,80 +17,76 @@ def simulate_learning(kt_model, original_seqs, topk_sequence, graph, yt_before, 
     """
     模拟将推荐资源插入原始序列后的知识状态变化
     Args:
-        kt_model (KTOnlyModel): 知识追踪模型，仅含GNN和KT模块
-        original_seqs (list): 原始输入序列 [batch_size, seq_len]
-        topk_sequence (list): 每个时间步的TopK推荐 [batch_size, seq_len-1, K]
-        graph (Data): 预加载的图数据
-        yt_before (Tensor): 原始知识状态 [batch_size, seq_len-1, num_skills]
-        batch_size (int): 批大小
-        K (int): TopK值
+        kt_model: KTOnlyModel实例，仅含GNN和KT模块
+        original_seqs: list[list[int]], 原始输入序列 [batch_size, seq_len]
+        topk_sequence: list[list[list[int]]], 每个时间步的TopK推荐 [batch_size, seq_len-1, K]
+        graph: Data, 预加载的图数据
+        yt_before: Tensor, 原始知识状态 [batch_size, seq_len-1, num_skills]
+        batch_size: int, 批大小
+        K: int, TopK值
     Returns:
-        yt_after (Tensor): 插入推荐后的知识状态 [batch_size, seq_len-1, K, num_skills]
+        yt_after: Tensor, 插入推荐后的知识状态 [batch_size, seq_len-1, K, num_skills]
     """
-    seq_len_minus_1 = len(topk_sequence[0])  # seq_len-1
-    yt_after = torch.zeros(batch_size, seq_len_minus_1, K, yt_before.shape[-1]).cuda()
+    seq_len_minus_1 = len(topk_sequence[0])  # 序列长度-1
+    num_skills = yt_before.shape[-1]
+    yt_after = torch.zeros(batch_size, seq_len_minus_1, K, num_skills).cuda()
 
     for t in range(seq_len_minus_1):
-        # 为每个时间步构建扩展序列
-        extended_inputs = []
-        extended_ans = []
+        extended_inputs = []  # 存储扩展后的序列
+        extended_ans = []  # 存储模拟的答案
+
+        # --- 为每个样本构建扩展序列 ---
         for b in range(batch_size):
-            original_seq = original_seqs[b]
-            # 获取实际有效长度（去除PAD）
-            actual_len = (torch.tensor(original_seq) != Constants.PAD).sum().item()
-            original_seq = original_seq[:actual_len].tolist()
+            # 原始序列处理
+            original_seq = original_seqs[b]  # list[int], 当前样本的原始序列
+            actual_len = sum(1 for x in original_seq if x != Constants.PAD)  # 计算有效长度
+            original_seq = original_seq[:actual_len]  # 截断PAD部分，得到实际序列
 
             # 获取当前时间步的TopK推荐（过滤PAD）
-            recommended = topk_sequence[b][t]
-            valid_rec = [r for r in recommended if r != Constants.PAD][:K]
+            recommended = topk_sequence[b][t]  # list[int], 当前时间步的推荐
+            valid_rec = [r for r in recommended if r != Constants.PAD][:K]  # 有效推荐
 
-            # 插入位置：当前时间步t+1（原始序列中t之后）
+            # 确定插入位置（当前时间步t+1的位置）
             insert_pos = t + 1
             if insert_pos > len(original_seq):
-                insert_pos = len(original_seq)
+                insert_pos = len(original_seq)  # 不超过实际长度
 
-            # 构建新序列：原始序列 + 推荐资源
+            # 构建新序列：原始序列前insert_pos个元素 + 推荐资源
             new_seq = original_seq[:insert_pos] + valid_rec
             extended_inputs.append(new_seq)
 
             # 生成模拟答案：假设推荐资源预测正确率>0.5则正确
-            pred_probs = yt_before[b, t, valid_rec].detach()
-            sim_answers = (pred_probs > 0.5).float().tolist()
-            new_ans = [0.0] * insert_pos + sim_answers  # 原始部分答案设为0，推荐部分用预测值
+            pred_probs = yt_before[b, t, valid_rec].detach()  # Tensor[K]
+            sim_answers = (pred_probs > 0.5).float().tolist()  # list[float]
+            new_ans = [0.0] * insert_pos + sim_answers  # 原始部分答案设为0
             extended_ans.append(new_ans)
 
-        # 对齐序列长度并转换为Tensor
-        max_len = max(len(seq) for seq in extended_inputs)
-        padded_inputs = torch.full((batch_size, max_len), Constants.PAD, dtype=torch.long).cuda()
-        padded_ans = torch.zeros((batch_size, max_len), dtype=torch.float).cuda()
-        for b in range(batch_size):
-            seq_len = len(extended_inputs[b])
-            padded_inputs[b, :seq_len] = torch.LongTensor(extended_inputs[b]).cuda()
-            padded_ans[b, :len(extended_ans[b])] = torch.FloatTensor(extended_ans[b]).cuda()
+        # --- 对齐序列长度并转换为Tensor ---
+        max_len = max(len(seq) for seq in extended_inputs)  # 当前批次最大长度
+        padded_inputs = torch.full((batch_size, max_len), Constants.PAD, dtype=torch.long).cuda()  # [B, max_len]
+        padded_ans = torch.zeros((batch_size, max_len), dtype=torch.float).cuda()  # [B, max_len]
 
-        # 重新预测知识状态
+        for b in range(batch_size):
+            seq = extended_inputs[b]
+            ans = extended_ans[b]
+            padded_inputs[b, :len(seq)] = torch.LongTensor(seq)  # 填充输入序列
+            padded_ans[b, :len(ans)] = torch.FloatTensor(ans)  # 填充答案序列
+
+        # --- 重新预测知识状态 ---
         with torch.no_grad():
-            yt_after_batch = kt_model(padded_inputs, padded_ans, graph)  # [batch_size, max_len, num_skills]
+            yt_after_batch = kt_model(padded_inputs, padded_ans, graph)  # [B, max_len, num_skills]
 
-        # 提取推荐资源对应的知识状态（插入后的最后K个时间步）
+        # --- 提取推荐资源对应的知识状态 ---
         for b in range(batch_size):
-            seq_len = len(extended_inputs[b])
-            valid_rec = [r for r in recommended if r != Constants.PAD][:K]  # 重新获取有效推荐
+            seq = extended_inputs[b]
+            valid_rec = [r for r in topk_sequence[b][t] if r != Constants.PAD][:K]  # 有效推荐
+            start_pos = len(seq) - len(valid_rec)  # 推荐资源起始位置
 
-            # 严格校验插入位置
-            start_pos = seq_len - len(valid_rec)
-            if start_pos < 0 or len(valid_rec) == 0:
-                continue
+            if start_pos >= 0 and len(valid_rec) > 0:
+                # 提取插入后的知识状态 [len(valid_rec), num_skills]
+                yt_after[b, t, :len(valid_rec)] = yt_after_batch[b, start_pos:start_pos + len(valid_rec)]
 
-            # 确保提取范围有效
-            end_pos = start_pos + len(valid_rec)
-            if end_pos > yt_after_batch.shape[1]:
-                continue
-
-            # 精确写入目标位置
-            yt_after[b, t, :len(valid_rec)] = yt_after_batch[b, start_pos:end_pos]
-
-        # 释放显存
+        # 显存释放
         del padded_inputs, padded_ans, yt_after_batch
         torch.cuda.empty_cache()
 
@@ -98,58 +94,72 @@ def simulate_learning(kt_model, original_seqs, topk_sequence, graph, yt_before, 
 
 
 def gain_test_epoch(model, kt_model, test_data, graph, hypergraph_list, kt_loss, k_list=[5, 10, 20], topnum=5):
-    """测试流程集成有效性计算"""
+    """
+    执行测试流程，计算准确性指标和有效性指标
+    Args:
+        model: MSHGAT模型实例
+        kt_model: KTOnlyModel实例
+        test_data: DataLoader, 测试数据集
+        graph: Data, 关系图数据
+        hypergraph_list: list, 超图数据
+        kt_loss: KTLoss实例
+        k_list: list[int], 需要计算的TopK指标
+        topnum: int, 实际使用的TopK值
+    Returns:
+        scores: dict, 各TopK的HitRate和MAP
+        auc_list: list[float], AUC值列表
+        acc_list: list[float], ACC值列表
+        E_p: float, 平均有效性增益
+    """
     model.eval()
+    metric = Metrics()  # 指标计算实例
     scores = {f'hits@{k}': 0.0 for k in k_list}
     scores.update({f'map@{k}': 0.0 for k in k_list})
-    total_valid = 0
+    total_valid = 0  # 有效样本总数
     auc_list, acc_list = [], []
-    total_gain = 0.0
-    valid_count = 0
+    total_gain = 0.0  # 累计增益
+    valid_count = 0  # 有效批次计数
 
     with torch.no_grad():
         for batch in test_data:
-            # 数据准备
-            tgt, tgt_t, tgt_idx, ans = [x.cuda() for x in batch]
+            # --- 数据准备 ---
+            tgt, tgt_t, tgt_idx, ans = [x.cuda() for x in batch]  # tgt: [B, seq_len]
             batch_size, seq_len = tgt.shape
 
-            # 模型前向
+            # --- 模型前向传播 ---
             pred, pred_res, kt_mask, yt_before = model(tgt, tgt_t, tgt_idx, ans, graph, hypergraph_list)
+            # pred: [B*(seq_len-1), num_skills]
+            # yt_before: [B, seq_len-1, num_skills]
 
-            # 计算传统指标
-            y_gold = tgt[:, 1:].reshape(-1).cpu()
-            y_pred = pred.detach().cpu().numpy()
+            # --- 计算传统指标 ---
+            y_gold = tgt[:, 1:].reshape(-1).cpu().numpy()  # [B*(seq_len-1)]
+            y_pred = pred.detach().cpu().numpy()  # [B*(seq_len-1), num_skills]
+
+            # 计算HitRate和MAP
             batch_scores, _ = metric.compute_metric(y_pred, y_gold, k_list)
             for k in k_list:
                 scores[f'hits@{k}'] += batch_scores[f'hits@{k}'] * batch_size * (seq_len - 1)
                 scores[f'map@{k}'] += batch_scores[f'map@{k}'] * batch_size * (seq_len - 1)
             total_valid += batch_size * (seq_len - 1)
 
-            # 生成TopK序列
-            _, topk_seq, _ = metric.gaintest_compute_metric(y_pred, y_gold.numpy(), batch_size, seq_len, k_list, topnum)
+            # --- 生成TopK序列 ---
+            _, topk_seq, _ = metric.gaintest_compute_metric(y_pred, y_gold, batch_size, seq_len, k_list, topnum)
+            # topk_seq: list[list[list[int]]], [B, seq_len-1, K]
 
-            # 转换格式
-            topk_tensor = torch.tensor(
-                [[seq + [Constants.PAD] * (topnum - len(seq)) for seq in sample]
-                 for sample in topk_seq],
-                dtype=torch.long
-            ).cuda()  # [batch, seq_len-1, K]
+            # --- 转换格式为Tensor ---
+            topk_tensor = torch.full((batch_size, seq_len - 1, topnum), Constants.PAD, dtype=torch.long).cuda()
+            for b in range(batch_size):
+                for t in range(seq_len - 1):
+                    recs = topk_seq[b][t][:topnum]
+                    topk_tensor[b, t, :len(recs)] = torch.LongTensor(recs)
 
-            # 模拟学习并计算E_p
-            yt_after = simulate_learning(
-                kt_model,
-                tgt.tolist(),
-                topk_seq,
-                graph,
-                yt_before,
-                batch_size,
-                topnum
-            )
+            # --- 模拟学习并计算E_p ---
+            yt_after = simulate_learning(kt_model, tgt.tolist(), topk_seq, graph, yt_before, batch_size, topnum)
             batch_gain = metric.compute_effectiveness(yt_before, yt_after, topk_tensor)
             total_gain += batch_gain
             valid_count += 1
 
-    # 归一化指标
+    # --- 指标归一化 ---
     for k in k_list:
         scores[f'hits@{k}'] /= total_valid
         scores[f'map@{k}'] /= total_valid
