@@ -149,11 +149,11 @@ class Metrics(object):
         """
         计算推荐资源的有效性指标E_p
         Args:
-            yt_before (Tensor): 原始知识状态 [batch_size, seq_len-1, num_skills]
-            yt_after (Tensor): 插入后的知识状态 [batch_size, seq_len-1, K, num_skills]
-            topk_indices (Tensor): TopK推荐索引 [batch_size, seq_len-1, K]
+            yt_before: Tensor, 原始知识状态 [B, seq_len-1, num_skills]
+            yt_after: Tensor, 插入后的知识状态 [B, seq_len-1, K, num_skills]
+            topk_indices: Tensor, TopK推荐索引 [B, seq_len-1, K]
         Returns:
-            E_p (float): 平均有效性增益
+            E_p: float, 平均有效性增益
         """
         batch_size, seq_len_minus_1, K = topk_indices.shape
         total_gain = 0.0
@@ -161,10 +161,10 @@ class Metrics(object):
 
         for b in range(batch_size):
             for t in range(seq_len_minus_1):
-                # 获取当前时间步的推荐索引
+                # 获取当前时间步的推荐索引并过滤无效值
                 recommended = topk_indices[b, t].tolist()
-                # 过滤无效索引（PAD和越界）
-                valid_rec = [r for r in recommended if r != Constants.PAD and r < yt_before.shape[2]]
+                valid_rec = [r for r in recommended if r != Constants.PAD and 0 <= r < yt_before.shape[2]]
+
                 if not valid_rec:
                     continue
 
@@ -172,66 +172,72 @@ class Metrics(object):
                 pb = yt_before[b, t, valid_rec]  # [num_valid]
                 pa = yt_after[b, t, :len(valid_rec), valid_rec].diagonal()  # [num_valid]
 
-                # 计算增益
-                mask = (pb < 1.0 - 1e-6)  # 避免除零
-                gain = ((pa[mask] - pb[mask]) / (1.0 - pb[mask])).sum()
-                total_gain += gain.item()
+                # 计算有效增益
+                mask = (pb < 1.0 - 1e-6) & (pa >= 0) & (pa <= 1)  # 有效概率范围
+                valid_delta = pa[mask] - pb[mask]
+                denominator = (1.0 - pb[mask]).clamp(min=1e-6)  # 防止除零
+                gain = (valid_delta / denominator).sum().item()
+
+                total_gain += gain
                 valid_count += mask.sum().item()
 
         return total_gain / valid_count if valid_count > 0 else 0.0
 
     def gaintest_compute_metric(self, y_prob, y_true, batch_size, seq_len, k_list=[10, 50, 100], topnum=None):
-        # 初始化所有指标
-        scores = {'hits@' + str(k): 0.0 for k in k_list}
-        scores.update({'map@' + str(k): 0.0 for k in k_list})
+        """
+        生成TopK序列并计算指标
+        Args:
+            y_prob: numpy.ndarray, 预测概率 [B*(seq_len-1), num_skills]
+            y_true: numpy.ndarray, 真实标签 [B*(seq_len-1)]
+            batch_size: int, 批大小
+            seq_len: int, 序列长度
+            k_list: list[int], 需要计算的TopK值
+            topnum: int, 实际使用的TopK值
+        Returns:
+            scores: dict, 各TopK的HitRate和MAP
+            topk_sequence: list[list[list[int]]], [B, seq_len-1, K]
+            valid_samples: int, 有效样本数
+        """
+        scores = {f'hits@{k}': 0.0 for k in k_list}
+        scores.update({f'map@{k}': 0.0 for k in k_list})
         valid_samples = 0
-
-        # 预初始化 detailed_results，确保长度与 total_samples 一致
         total_samples = batch_size * (seq_len - 1)
-        detailed_results = [{'topk_resources': [], 'hits': 0.0} for _ in range(total_samples)]
+        topk_sequence = [[] for _ in range(batch_size)]  # [B, seq_len-1, K]
 
         for i in range(total_samples):
-            p_ = y_prob[i]
-            y_ = y_true[i]
+            p_ = y_prob[i]  # [num_skills]
+            y_ = y_true[i]  # scalar
             if y_ == self.PAD:
-                continue  # 保持预初始化的空列表
+                continue
 
             valid_samples += 1
-            p_sort = p_.argsort()
-            topk = p_sort[-topnum:][::-1] if topnum else p_sort[-5:][::-1]
+            sorted_indices = np.argsort(p_)[::-1]  # 降序排列
+            topk = sorted_indices[:topnum] if topnum else sorted_indices[:5]
 
-            # 直接更新 detailed_results 的对应位置
-            detailed_results[i]['topk_resources'] = topk.tolist()
-            detailed_results[i]['hits'] = 1.0 if y_ in topk else 0.0
+            # 记录TopK序列
+            b = i // (seq_len - 1)  # 样本所属的batch
+            t = i % (seq_len - 1)  # 时间步
+            topk_sequence[b].append(topk.tolist())
 
-            # 计算 hits@k 和 map@k
+            # 计算指标
             for k in k_list:
-                hits = 1.0 if y_ in p_sort[-k:][::-1] else 0.0
-                scores['hits@' + str(k)] += hits
-                scores['map@' + str(k)] += self.apk([y_], p_sort[-k:][::-1], k)
+                hits = 1.0 if y_ in sorted_indices[:k] else 0.0
+                scores[f'hits@{k}'] += hits
+                scores[f'map@{k}'] += self.apk([y_], sorted_indices[:k], k)
 
-        # 归一化为均值
+        # 归一化指标
         for k in k_list:
-            if valid_samples > 0:
-                scores['hits@' + str(k)] /= valid_samples
-                scores['map@' + str(k)] /= valid_samples
-            else:
-                scores['hits@' + str(k)] = 0.0
-                scores['map@' + str(k)] = 0.0
+            scores[f'hits@{k}'] /= valid_samples
+            scores[f'map@{k}'] /= valid_samples
 
-        # 生成 topk_sequence
-        topk_sequence = []
+        # 调整TopK序列维度为 [B, seq_len-1, K]
+        adjusted_sequence = []
         for b in range(batch_size):
-            seq = []
-            for t in range(seq_len - 1):
-                idx = b * (seq_len - 1) + t
-                if idx < len(detailed_results):
-                    seq.append(detailed_results[idx]['topk_resources'][:topnum])
-                else:
-                    seq.append([])
-            topk_sequence.append(seq)
+            start = b * (seq_len - 1)
+            end = start + (seq_len - 1)
+            adjusted_sequence.append(topk_sequence[b][:seq_len - 1])
 
-        return scores, topk_sequence, valid_samples
+        return scores, adjusted_sequence, valid_samples
 
 
 # Calculate accuracy of prediction result and its corresponding label
