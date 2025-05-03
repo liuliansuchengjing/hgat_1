@@ -108,6 +108,8 @@ def gain_test_epoch(model, kt_model, test_data, graph, hypergraph_list, kt_loss,
             tgt = tgt.cuda()
             ans = ans.cuda()
             pred, pred_res, kt_mask, yt_before = model(tgt, tgt_timestamp.cuda(), tgt_idx.cuda(), ans, graph, hypergraph_list)
+            print("pred:", pred.size())
+            print("yt_before:", yt_before.size())
 
             # 计算当前批次的 AUC 和 ACC
             loss_kt, auc, acc = kt_loss(pred_res, ans, kt_mask)
