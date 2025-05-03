@@ -57,4 +57,4 @@ class DKT(nn.Module):
         next_skill_ids = questions[:, 1:]  # 下一题的skill_id [batch, seq_len-1]
         pred = torch.gather(yt, dim=2, index=next_skill_ids.unsqueeze(-1).to('cuda')).squeeze(-1)
 
-        return pred, mask  # [batch, seq_len-1]
+        return pred, mask, yt  # [batch, seq_len-1]
