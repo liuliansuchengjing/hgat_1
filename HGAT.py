@@ -262,7 +262,7 @@ class MSHGAT(nn.Module):
         input_timestamp = input_timestamp[:, :-1]
         hidden = self.dropout(self.gnn(graph))
         memory_emb_list = self.hgnn(hidden, hypergraph_list)
-        pred_res, kt_mask = self.ktmodel(hidden, original_input, ans)
+        pred_res, kt_mask, yt = self.ktmodel(hidden, original_input, ans)
 
         batch_size, max_len = input.size()
 
@@ -327,4 +327,27 @@ class MSHGAT(nn.Module):
         mask = get_previous_user_mask(input.cpu(), self.n_node)
         pre = (pred + mask).view(-1, pred.size(-1)).cuda()
 
-        return pre, pred_res, kt_mask
+        return pre, pred_res, kt_mask, yt
+
+
+class KTOnlyModel(nn.Module):
+    def __init__(self, original_model):
+        super(KTOnlyModel, self).__init__()
+        # 继承原模型的 GNN 和 KT 模块
+        self.gnn = original_model.gnn
+        self.ktmodel = original_model.ktmodel
+
+    def forward(self, input_seq, answers, graph):
+        """
+        输入:
+            input_seq: 原始序列 [batch_size, seq_len]
+            answers: 答题结果 [batch_size, seq_len]
+            graph: 预加载的图数据（用于 GNN 生成动态嵌入）
+        输出:
+            yt: 知识状态 [batch_size, seq_len-1, num_skills]
+        """
+        # 通过 GNN 生成动态技能嵌入
+        hidden = self.gnn(graph)
+        # 仅运行 KT 模块
+        _, _, yt = self.ktmodel(hidden, input_seq, answers)
+        return yt
