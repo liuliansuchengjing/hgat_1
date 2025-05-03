@@ -8,6 +8,8 @@ import networkx as nx
 import torch
 import torch.nn as nn
 from sklearn.metrics import roc_auc_score, accuracy_score
+import Constants
+import itertools
 
 
 def load_idx2u():
@@ -74,32 +76,45 @@ class Metrics(object):
 
     def compute_effectiveness(self, yt_before, yt_after, topk_indices):
         """
-        修改后的有效性计算（逐时间步独立计算）
-        输入维度说明：
-        yt_before: [B, seq_len, num_skills]
-        yt_after: [B, seq_len, K, num_skills]（每个时间步插入后的知识状态）
-        topk_indices: [B, seq_len, K]
+        精确计算每个推荐资源的有效性增益
+        Args:
+            yt_before: [batch_size, seq_len-1, num_skills]
+            yt_after: [batch_size, seq_len-1, K, num_skills]
+            topk_indices: [batch_size, seq_len-1, K]
+        Returns:
+            E_p: 平均有效性增益
         """
-        batch_size, seq_len, K = topk_indices.shape
+        batch_size, seq_len_minus_1, K = topk_indices.shape
         total_gain = 0.0
         valid_count = 0
 
         for b in range(batch_size):
-            for t in range(seq_len):
+            for t in range(seq_len_minus_1):
                 recommended = topk_indices[b, t].tolist()
-                valid_rec = [r for r in recommended if 0 <= r < yt_before.shape[2]]
+                # 严格过滤无效索引（PAD和越界）
+                valid_rec = [r for r in recommended
+                             if r != Constants.PAD
+                             and 0 <= r < yt_before.shape[2]]
+
                 if not valid_rec:
                     continue
 
-                # 原始知识状态（当前时间步）
-                pb = yt_before[b, t, valid_rec].mean().item()
-                # 插入后的知识状态（仅当前时间步的推荐）
-                pa = yt_after[b, t, :len(valid_rec), valid_rec].mean().item()
+                # 精确提取对应位置的预测概率
+                pb = yt_before[b, t, valid_rec]  # [num_valid]
+                pa = yt_after[b, t, :len(valid_rec), valid_rec].diagonal()  # [num_valid]
 
-                if pb < 1.0 - 1e-6:
-                    gain = (pa - pb) / (1.0 - pb)
-                    total_gain += gain
-                    valid_count += 1
+                # 数值稳定性处理
+                mask = (pb < 1.0 - 1e-6) & (pa >= 0) & (pa <= 1)  # 有效概率范围
+                if not mask.any():
+                    continue
+
+                # 逐元素计算增益
+                delta = (pa[mask] - pb[mask])
+                denominator = (1.0 - pb[mask]).clamp(min=1e-6)  # 防止除零
+                gain = (delta / denominator).sum().item()
+
+                total_gain += gain
+                valid_count += mask.sum().item()
 
         return total_gain / valid_count if valid_count > 0 else 0.0
 
@@ -128,13 +143,17 @@ class Metrics(object):
         return scores, scores_len
 
     # Metrics.py 的 compute_effectiveness 方法
-    def compute_effectiveness(self, yt_before, yt_after, inserted_lengths, topk_indices):
+    # Metrics.py
+
+    def compute_effectiveness(self, yt_before, yt_after, topk_indices):
         """
-        有效性计算（独立处理每个推荐资源）
-        输入维度说明：
-        yt_before: [B, seq_len, num_skills]（原始知识状态）
-        yt_after: [B, seq_len-1, num_skills]（每个时间步插入后的最终知识状态）
-        topk_indices: [B, seq_len-1, K]
+        计算推荐资源的有效性指标E_p
+        Args:
+            yt_before (Tensor): 原始知识状态 [batch_size, seq_len-1, num_skills]
+            yt_after (Tensor): 插入后的知识状态 [batch_size, seq_len-1, K, num_skills]
+            topk_indices (Tensor): TopK推荐索引 [batch_size, seq_len-1, K]
+        Returns:
+            E_p (float): 平均有效性增益
         """
         batch_size, seq_len_minus_1, K = topk_indices.shape
         total_gain = 0.0
@@ -142,23 +161,22 @@ class Metrics(object):
 
         for b in range(batch_size):
             for t in range(seq_len_minus_1):
+                # 获取当前时间步的推荐索引
                 recommended = topk_indices[b, t].tolist()
-                valid_rec = [r for r in recommended if 0 <= r < yt_before.shape[2]]
+                # 过滤无效索引（PAD和越界）
+                valid_rec = [r for r in recommended if r != Constants.PAD and r < yt_before.shape[2]]
                 if not valid_rec:
                     continue
 
-                # 原始知识状态（时间步t）
-                pb_values = yt_before[b, t, valid_rec]  # [K_valid]
-                # 插入后的知识状态（时间步t+K）
-                pa_values = yt_after[b, t, valid_rec]  # [K_valid]
+                # 提取前后概率
+                pb = yt_before[b, t, valid_rec]  # [num_valid]
+                pa = yt_after[b, t, :len(valid_rec), valid_rec].diagonal()  # [num_valid]
 
-                for k in range(len(valid_rec)):
-                    pb = pb_values[k].item()
-                    pa = pa_values[k].item()
-                    if pb < 1.0 - 1e-6:
-                        gain = (pa - pb) / (1.0 - pb)
-                        total_gain += gain
-                        valid_count += 1
+                # 计算增益
+                mask = (pb < 1.0 - 1e-6)  # 避免除零
+                gain = ((pa[mask] - pb[mask]) / (1.0 - pb[mask])).sum()
+                total_gain += gain.item()
+                valid_count += mask.sum().item()
 
         return total_gain / valid_count if valid_count > 0 else 0.0
 
