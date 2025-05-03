@@ -12,11 +12,6 @@ from Optim import ScheduledOptim
 
 metric = Metrics()
 
-import torch
-import numpy as np
-from torch import nn
-from Metrics import Metrics  # 保持原有Metrics类基础结构
-
 
 def simulate_learning(kt_model, original_seqs, topk_sequence, graph, yt_before, batch_size, K):
     """
@@ -124,14 +119,14 @@ def gain_test_epoch(model, kt_model, test_data, graph, hypergraph_list, kt_loss,
             # 计算传统指标
             y_gold = tgt[:, 1:].reshape(-1).cpu()
             y_pred = pred.detach().cpu().numpy()
-            batch_scores, _ = Metrics.compute_metric(y_pred, y_gold, k_list)
+            batch_scores, _ = metric.compute_metric(y_pred, y_gold, k_list)
             for k in k_list:
                 scores[f'hits@{k}'] += batch_scores[f'hits@{k}'] * batch_size * (seq_len - 1)
                 scores[f'map@{k}'] += batch_scores[f'map@{k}'] * batch_size * (seq_len - 1)
             total_valid += batch_size * (seq_len - 1)
 
             # 生成TopK序列
-            _, topk_seq, _ = Metrics.gaintest_compute_metric(y_pred, y_gold.numpy(), batch_size, seq_len, k_list, topnum)
+            _, topk_seq, _ = metric.gaintest_compute_metric(y_pred, y_gold.numpy(), batch_size, seq_len, k_list, topnum)
 
             # 转换格式
             topk_tensor = torch.tensor(
@@ -150,7 +145,7 @@ def gain_test_epoch(model, kt_model, test_data, graph, hypergraph_list, kt_loss,
                 batch_size,
                 topnum
             )
-            batch_gain = Metrics.compute_effectiveness(yt_before, yt_after, topk_tensor)
+            batch_gain = metric.compute_effectiveness(yt_before, yt_after, topk_tensor)
             total_gain += batch_gain
             valid_count += 1
 
