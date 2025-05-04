@@ -45,7 +45,7 @@ def simulate_learning(kt_model, original_seqs, original_ans, topk_sequence, grap
 
             extended_inputs.append(new_seq)# 将新序列添加到扩展输入列表中 [insert_pos + K]
 
-            pred_answers = (yt_before[b, t, recommended] > 0.4).float().tolist() # 基于yt_before的当前时间步t生成预测答案
+            pred_answers = (yt_before[b, t, recommended] >= 0).float().tolist() # 基于yt_before的当前时间步t生成预测答案
             new_ans = original_an[:insert_pos] + pred_answers # 构建答案序列，前t+1个位置为原始序列答案，推荐位置为预测答案
             extended_ans.append(new_ans)# 将新答案序列添加到扩展答案列表中# [insert_pos + K]
 
@@ -79,7 +79,7 @@ def simulate_learning(kt_model, original_seqs, original_ans, topk_sequence, grap
     return torch.stack(yt_after_list, dim=1)  # 维度: [batch_size, seq_len-1, num_skills]
 
 
-def gain_test_epoch(model, kt_model, test_data, graph, hypergraph_list, kt_loss, k_list=[5, 10, 20], topnum=1):
+def gain_test_epoch(model, kt_model, test_data, graph, hypergraph_list, kt_loss, k_list=[5, 10, 20], topnum=2):
     model.eval()# 将模型设置为评估模式
     auc_test, acc_test = [], []
     scores = {'hits@' + str(k): 0.0 for k in k_list}
