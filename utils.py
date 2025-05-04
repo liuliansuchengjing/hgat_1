@@ -41,8 +41,8 @@ def simulate_learning(kt_model, original_seqs, original_ans, topk_sequence, grap
             original_seq = original_seqs[b]  # 获取当前样本的原始序列, 维度: [original_seq_len]
             original_an = original_ans[b]
             recommended = topk_sequence[b][t]  # 获取当前时间步的推荐资源, 维度: [K]
-            # random.seed(42) 
-            # random.shuffle(recommended)  # 打乱顺序
+            random.seed(42) 
+            random.shuffle(recommended)  # 打乱顺序
             insert_pos = t + 1  # 插入位置（当前时间步之后）
             new_seq = original_seq[:insert_pos] + recommended# 构建新的序列，包含原始序列前t+1个元素和推荐的K个元素
 
@@ -82,7 +82,7 @@ def simulate_learning(kt_model, original_seqs, original_ans, topk_sequence, grap
     return torch.stack(yt_after_list, dim=1)  # 维度: [batch_size, seq_len-1, num_skills]
 
 
-def gain_test_epoch(model, kt_model, test_data, graph, hypergraph_list, kt_loss, k_list=[5, 10, 20], topnum=1):
+def gain_test_epoch(model, kt_model, test_data, graph, hypergraph_list, kt_loss, k_list=[5, 10, 20], topnum=2):
     model.eval()# 将模型设置为评估模式
     auc_test, acc_test = [], []
     scores = {'hits@' + str(k): 0.0 for k in k_list}
