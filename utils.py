@@ -45,7 +45,7 @@ def simulate_learning(kt_model, original_seqs, original_ans, topk_sequence, grap
 
             extended_inputs.append(new_seq)# 将新序列添加到扩展输入列表中 [insert_pos + K]
 
-            pred_answers = (yt_before[b, t, recommended] > 0.5).float().tolist() # 基于yt_before的当前时间步t生成预测答案
+            pred_answers = (yt_before[b, t, recommended] > 0.6).float().tolist() # 基于yt_before的当前时间步t生成预测答案
             new_ans = original_an[:insert_pos] + pred_answers # 构建答案序列，前t+1个位置为原始序列答案，推荐位置为预测答案
             extended_ans.append(new_ans)# 将新答案序列添加到扩展答案列表中# [insert_pos + K]
 
