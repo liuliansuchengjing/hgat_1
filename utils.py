@@ -101,39 +101,39 @@ def gain_test_epoch(model, kt_model, test_data, graph, hypergraph_list, kt_loss,
             # kt_mask维度: [batch_size, seq_len]
             # yt_before维度: [batch_size, seq_len-1, num_skills]
 
-            # # 将数据转移到CPU并转换为NumPy
-            # tgt_np = tgt.cpu().numpy()  # [batch_size, seq_len]
-            # ans_np = ans.cpu().numpy()  # [batch_size, seq_len]
-            # yt_before_np = yt_before.cpu().numpy()  # [batch_size, seq_len-1, num_skills]
-            #
-            # batch_size, seq_len = tgt_np.shape
-            #
-            # # 遍历每个样本
-            # for b in range(batch_size):
-            #     print(f"\n=== Batch {i}, Sample {b} ===")
-            #
-            #     # 打印 tgt 前10个时间步（题目ID）
-            #     print("[tgt] First 10 steps:", list(tgt_np[b, :10]))
-            #
-            #     # 打印 ans 前10个时间步（答题结果）
-            #     print("[ans] First 10 steps:", list(ans_np[b, :10].round(2)))  # 保留两位小数
-            #
-            #     # 打印 yt_before 中对应 tgt 的每个时间步的概率值
-            #     print("[yt_before] Corresponding skill probabilities:")
-            #     for t in range(10):
-            #         if t >= seq_len - 1:
-            #             break  # 避免越界（yt_before只有seq_len-1个时间步）
-            #
-            #         for i in range(10):
-            #             # 获取当前时间步 t+1 的题目ID（因为 yt_before[t] 预测的是 t+1 的题目）
-            #             skill_id = tgt_np[b, i]
-            #
-            #             # 跳过PAD或非法ID
-            #             if skill_id == Constants.PAD or skill_id >= yt_before_np.shape[2]:
-            #                 continue
-            #             prob = yt_before_np[b, t, skill_id]
-            #             print(f"  Step {i}: SkillID={skill_id} -> Prob={prob:.4f}")
-
+            # 将数据转移到CPU并转换为NumPy
+            tgt_np = tgt.cpu().numpy()  # [batch_size, seq_len]
+            ans_np = ans.cpu().numpy()  # [batch_size, seq_len]
+            yt_before_np = yt_before.cpu().numpy()  # [batch_size, seq_len-1, num_skills]
+            
+            batch_size, seq_len = tgt_np.shape
+            
+            # 遍历每个样本
+            for b in range(batch_size):
+                print(f"\n=== Batch {i}, Sample {b} ===")
+            
+                # 打印 tgt 前10个时间步（题目ID）
+                print("[tgt] First 10 steps:", list(tgt_np[b, :10]))
+            
+                # 打印 ans 前10个时间步（答题结果）
+                print("[ans] First 10 steps:", list(ans_np[b, :10].round(2)))  # 保留两位小数
+            
+                # 打印 yt_before 中对应 tgt 的每个时间步的概率值
+                print("[yt_before] Corresponding skill probabilities:")
+                for t in range(10):
+                    if t >= seq_len - 1:
+                        break  # 避免越界（yt_before只有seq_len-1个时间步）
+            
+                    for i in range(10):
+                        # 获取当前时间步 t+1 的题目ID（因为 yt_before[t] 预测的是 t+1 的题目）
+                        skill_id = tgt_np[b, i]
+            
+                        # 跳过PAD或非法ID
+                        if skill_id == Constants.PAD or skill_id >= yt_before_np.shape[2]:
+                            continue
+                        prob = yt_before_np[b, t, skill_id]
+                        print(f"  Step {i}: SkillID={skill_id} -> Prob={prob:.4f}", end=" ")
+                    print()
 
             loss_kt, auc, acc = kt_loss(pred_res, ans, kt_mask)# 计算当前批次的AUC和ACC
             if auc != -1:    # 如果AUC计算成功，则将其添加到列表中
