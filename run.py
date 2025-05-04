@@ -263,7 +263,7 @@ def test_model(MSHGAT, data_path):
 
 if __name__ == "__main__":
     model = MSHGAT
-    # train_model(model, opt.data_name)
+    train_model(model, opt.data_name)
     # test_model(model, opt.data_name)
     # gain_test_model(model, opt.data_name, opt)
-    gain_test_model(model, opt.data_name, opt)
+    # gain_test_model(model, opt.data_name, opt)
