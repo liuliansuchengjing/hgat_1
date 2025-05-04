@@ -132,7 +132,7 @@ def gain_test_epoch(model, kt_model, test_data, graph, hypergraph_list, kt_loss,
                         if skill_id == Constants.PAD or skill_id >= yt_before_np.shape[2]:
                             continue
                         prob = yt_before_np[b, t, skill_id]
-                        print(f"  Step {i}: SkillID={skill_id} -> Prob={prob:.4f}", end=" ")
+                        print(f"{i}:S:{skill_id}-Prob:{prob:.4f}", end=" ")
                     print()
 
             loss_kt, auc, acc = kt_loss(pred_res, ans, kt_mask)# 计算当前批次的AUC和ACC
