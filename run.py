@@ -175,7 +175,7 @@ def train_model(MSHGAT, data_path):
                 print(metric + ' ' + str(scores[metric]))
             print('auc_test: {:.10f}'.format(np.mean(auc_test)),
                   'acc_test: {:.10f}'.format(np.mean(acc_test)))
-            if validation_history <= sum(scores.values() and his_auc<=(np.mean(auc_test)) and his_acc <=(np.mean(acc_test))):
+            if (validation_history <= sum(scores.values())) and (his_auc<=(np.mean(auc_test))) and (his_acc <=(np.mean(acc_test))):
                 print("Best Validation hit@100:{} at Epoch:{}".format(scores["hits@20"], epoch_i))
                 validation_history = sum(scores.values())
                 his_auc = np.mean(auc_test)
@@ -263,7 +263,7 @@ def test_model(MSHGAT, data_path):
 
 if __name__ == "__main__":
     model = MSHGAT
-    train_model(model, opt.data_name)
+    # train_model(model, opt.data_name)
     # test_model(model, opt.data_name)
     # gain_test_model(model, opt.data_name, opt)
-    # gain_test_model(model, opt.data_name, opt)
+    gain_test_model(model, opt.data_name, opt)
