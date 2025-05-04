@@ -40,12 +40,12 @@ def simulate_learning(kt_model, original_seqs, original_ans, topk_sequence, grap
             original_seq = original_seqs[b]  # 获取当前样本的原始序列, 维度: [original_seq_len]
             original_an = original_ans[b]
             recommended = topk_sequence[b][t]  # 获取当前时间步的推荐资源, 维度: [K]
-            insert_pos = t + 2  # 插入位置（当前时间步之后）
+            insert_pos = t + 1  # 插入位置（当前时间步之后）
             new_seq = original_seq[:insert_pos] + recommended# 构建新的序列，包含原始序列前t+1个元素和推荐的K个元素
 
             extended_inputs.append(new_seq)# 将新序列添加到扩展输入列表中 [insert_pos + K]
 
-            pred_answers = (yt_before[b, t, recommended] > 0.6).float().tolist() # 基于yt_before的当前时间步t生成预测答案
+            pred_answers = (yt_before[b, t, recommended] > 0.5).float().tolist() # 基于yt_before的当前时间步t生成预测答案
             new_ans = original_an[:insert_pos] + pred_answers # 构建答案序列，前t+1个位置为原始序列答案，推荐位置为预测答案
             extended_ans.append(new_ans)# 将新答案序列添加到扩展答案列表中# [insert_pos + K]
 
@@ -79,7 +79,7 @@ def simulate_learning(kt_model, original_seqs, original_ans, topk_sequence, grap
     return torch.stack(yt_after_list, dim=1)  # 维度: [batch_size, seq_len-1, num_skills]
 
 
-def gain_test_epoch(model, kt_model, test_data, graph, hypergraph_list, kt_loss, k_list=[5, 10, 20], topnum=5):
+def gain_test_epoch(model, kt_model, test_data, graph, hypergraph_list, kt_loss, k_list=[5, 10, 20], topnum=1):
     model.eval()# 将模型设置为评估模式
     auc_test, acc_test = [], []
     scores = {'hits@' + str(k): 0.0 for k in k_list}
@@ -105,29 +105,29 @@ def gain_test_epoch(model, kt_model, test_data, graph, hypergraph_list, kt_loss,
             # tgt_np = tgt.cpu().numpy()  # [batch_size, seq_len]
             # ans_np = ans.cpu().numpy()  # [batch_size, seq_len]
             # yt_before_np = yt_before.cpu().numpy()  # [batch_size, seq_len-1, num_skills]
-            # 
+            #
             # batch_size, seq_len = tgt_np.shape
-            # 
+            #
             # # 遍历每个样本
             # for b in range(batch_size):
             #     print(f"\n=== Batch {i}, Sample {b} ===")
-            # 
+            #
             #     # 打印 tgt 前10个时间步（题目ID）
             #     print("[tgt] First 10 steps:", list(tgt_np[b, :10]))
-            # 
+            #
             #     # 打印 ans 前10个时间步（答题结果）
             #     print("[ans] First 10 steps:", list(ans_np[b, :10].round(2)))  # 保留两位小数
-            # 
+            #
             #     # 打印 yt_before 中对应 tgt 的每个时间步的概率值
             #     print("[yt_before] Corresponding skill probabilities:")
             #     for t in range(10):
             #         if t >= seq_len - 1:
             #             break  # 避免越界（yt_before只有seq_len-1个时间步）
-            # 
+            #
             #         for i in range(10):
             #             # 获取当前时间步 t+1 的题目ID（因为 yt_before[t] 预测的是 t+1 的题目）
             #             skill_id = tgt_np[b, i]
-            # 
+            #
             #             # 跳过PAD或非法ID
             #             if skill_id == Constants.PAD or skill_id >= yt_before_np.shape[2]:
             #                 continue
