@@ -41,8 +41,8 @@ def simulate_learning(kt_model, original_seqs, original_ans, topk_sequence, grap
             original_seq = original_seqs[b]  # 获取当前样本的原始序列, 维度: [original_seq_len]
             original_an = original_ans[b]
             recommended = topk_sequence[b][t]  # 获取当前时间步的推荐资源, 维度: [K]
-            random.seed(42) 
-            random.shuffle(recommended)  # 打乱顺序
+            # random.seed(42) 
+            # random.shuffle(recommended)  # 打乱顺序
             insert_pos = t + 1  # 插入位置（当前时间步之后）
             new_seq = original_seq[:insert_pos] + recommended# 构建新的序列，包含原始序列前t+1个元素和推荐的K个元素
 
