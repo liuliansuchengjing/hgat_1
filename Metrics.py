@@ -72,56 +72,6 @@ class Metrics(object):
         # 	return 0.0
         return score / min(len(actual), k)
 
-    def compute_effectiveness(self, yt_before, yt_after, inserted_lengths, topk_indices):
-        """
-        有效性计算（独立处理每个推荐资源）
-        输入维度说明：
-        yt_before: [B, seq_len-1, num_skills]（原始知识状态）
-        yt_after: [B, seq_len-1, num_skills]（每个时间步插入后的最终知识状态）
-        topk_indices: [B, seq_len-1, K]
-        """
-        # 获取批次大小、推荐时间步数和每个时间步的推荐数量
-        batch_size, seq_len_minus_1, K = topk_indices.shape
-        # 有效性指标的累积值
-        total_gain = 0.0
-        # 有效的推荐资源数量
-        valid_count = 0
-
-        # 遍历每个样本
-        for b in range(batch_size):
-            # 遍历每个推荐时间步
-            for t in range(seq_len_minus_1):
-                # 获取当前时间步的推荐资源列表
-                recommended = topk_indices[b, t].tolist()
-                # 过滤出有效的推荐资源
-                valid_rec = [r for r in recommended if 0 < r < yt_before.shape[2]]
-                # 如果没有有效的推荐资源，则跳过当前时间步
-                if not valid_rec:
-                    continue
-
-                # 获取原始知识状态（时间步t）
-                pb_values = yt_before[b, t, valid_rec]  # 维度: [K_valid]
-                # 获取插入后的知识状态（时间步t+K）
-                pa_values = yt_after[b, t, valid_rec]  # 维度: [K_valid]
-
-                # 遍历每个有效的推荐资源
-                for k in range(len(valid_rec)):
-                    # 获取原始知识状态值
-                    pb = pb_values[k].item()
-                    # 获取插入后的知识状态值
-                    pa = pa_values[k].item()
-                    # 如果原始知识状态小于1，则计算增益
-                    if pb < 1.0 - 1e-6:
-                        gain = (pa - pb) / (1.0 - pb)
-                        # 累加增益
-                        total_gain += gain
-                        # 累加有效的推荐资源数量
-                        valid_count += 1
-
-        # 计算平均有效性
-        return total_gain / valid_count if valid_count > 0 else 0.0
-
-
     def compute_metric(self, y_prob, y_true, k_list=[10, 50, 100]):
         '''
             y_true: (#samples, )
@@ -174,7 +124,7 @@ class Metrics(object):
                     pb = pb_values[k].item()
                     pa = pa_values[k].item()
                     # if pb < 1.0 - 1e-6 and pa > 0:
-                    if pb < 0.8 and pa > 0:
+                    if pb < 0.9 and pa > 0:
                         gain = (pa - pb) / (1.0 - pb)
                         # print("pb:",pb)
                         # print("pa:",pa)
