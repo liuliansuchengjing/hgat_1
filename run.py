@@ -92,7 +92,7 @@ def train_epoch(model, training_data, graph, hypergraph_list, loss_func, kt_loss
         loss, n_correct = get_performance(loss_func, pred, gold)
         loss_kt, auc, acc = kt_loss(pred_res, ans,
                                     kt_mask)  # ============================================================================
-        loss = loss + loss_kt
+        loss = loss + loss_kt*3
         # print("loss_kt:", loss_kt)
 
         loss.backward()
@@ -141,6 +141,9 @@ def train_model(MSHGAT, data_path):
         kt_loss = kt_loss.cuda()
 
     validation_history = 0.0
+    his_auc = 5.0
+    his_acc = 0.0
+
     best_scores = {}
     for epoch_i in range(opt.epoch):
         print('\n[ Epoch', epoch_i, ']')
@@ -172,9 +175,11 @@ def train_model(MSHGAT, data_path):
                 print(metric + ' ' + str(scores[metric]))
             print('auc_test: {:.10f}'.format(np.mean(auc_test)),
                   'acc_test: {:.10f}'.format(np.mean(acc_test)))
-            if validation_history <= sum(scores.values()):
+            if validation_history <= sum(scores.values() and his_auc<=(np.mean(auc_test)) and his_acc <=(np.mean(acc_test))):
                 print("Best Validation hit@100:{} at Epoch:{}".format(scores["hits@20"], epoch_i))
                 validation_history = sum(scores.values())
+                his_auc = np.mean(auc_test)
+                his_acc = np.mean(acc_test)
                 best_scores = scores
                 print("Save best model!!!")
                 torch.save(model.state_dict(), opt.save_path)
@@ -259,6 +264,6 @@ def test_model(MSHGAT, data_path):
 if __name__ == "__main__":
     model = MSHGAT
     # train_model(model, opt.data_name)
-    # test_model(model, opt.data_name)
+    test_model(model, opt.data_name)
     # gain_test_model(model, opt.data_name, opt)
-    gain_test_model(model, opt.data_name, opt)
+    # gain_test_model(model, opt.data_name, opt)
