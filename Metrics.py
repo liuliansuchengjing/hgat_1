@@ -268,7 +268,7 @@ class KTLoss(nn.Module):
             y_true = real_answers[answer_mask].cpu().detach().numpy()
             y_pred = pred_answers[answer_mask].cpu().detach().numpy()
             auc = roc_auc_score(y_true, y_pred)
-            acc = accuracy_score(y_true, (y_pred >= 0.5).astype(int))  # 直接根据概率阈值计算ACC
+            acc = accuracy_score(y_true, (y_pred >= 0.6).astype(int))  # 直接根据概率阈值计算ACC
         except ValueError:
             auc, acc = -1, -1
 
