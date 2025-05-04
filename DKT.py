@@ -24,10 +24,9 @@ class DKT(nn.Module):
                 Returns:
                     pred: 下一题正确概率预测 [batch_size, seq_len-1]
                 """
-        batch_size, max_seq_len = questions.shape
         mask = (questions[:, 1:] >= 2).float()
 
-        # --- 步骤1：生成每个时间步的输入特征 ---
+        # --- 生成每个时间步的输入特征 ---
         # 根据题目ID获取动态嵌入 [batch_size, seq_len, emb_dim]
         skill_embeds = dynamic_skill_embeds[questions]  # 索引操作
 
@@ -36,25 +35,15 @@ class DKT(nn.Module):
 
         # 拼接题目嵌入和答题结果嵌入 [batch_size, seq_len, emb_dim*2]
         lstm_input = torch.cat([skill_embeds, correct_embeds], dim=-1)
-
-        # seq_lens = ((questions != 0) & (questions != 1)).sum(dim=1)
-
-        # # --- 步骤2：处理变长序列 ---
-        # packed_input = pack_padded_sequence(
-        #     lstm_input, seq_lens.cpu(),
-        #     batch_first=True, enforce_sorted=False
-        # )
-
-        # --- 步骤3：LSTM时序建模 ---
         output, (hn, cn) = self.rnn(lstm_input)
-        # output, _ = pad_packed_sequence(packed_output, batch_first=True)  # [batch, seq_len, hidden_dim]
 
-        # --- 步骤4：预测下一题正确概率 ---
+        # --- 预测下一题正确概率 ---
         yt = torch.sigmoid(self.fc(output))  # [batch, seq_len, num_skills]
+        yt_all = yt
         yt = yt[:, :-1, :]  # 对齐下一题预测 [batch, seq_len-1, num_skills]
 
-        # --- 步骤5：提取目标题概率 ---
+        # --- 提取目标题概率 ---
         next_skill_ids = questions[:, 1:]  # 下一题的skill_id [batch, seq_len-1]
         pred = torch.gather(yt, dim=2, index=next_skill_ids.unsqueeze(-1).to('cuda')).squeeze(-1)
 
-        return pred, mask, yt  # [batch, seq_len-1]
+        return pred, mask, yt, yt_all  # [batch, seq_len-1]
