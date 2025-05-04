@@ -9,6 +9,7 @@ from dataLoader import Split_data, DataLoader
 from Metrics import Metrics, KTLoss
 from HGAT import MSHGAT, KTOnlyModel
 from Optim import ScheduledOptim
+import random
 
 # 初始化一个Metrics类的实例，用于后续的指标计算
 metric = Metrics()
