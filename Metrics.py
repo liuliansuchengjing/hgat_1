@@ -173,7 +173,8 @@ class Metrics(object):
                 for k in range(len(valid_rec)):
                     pb = pb_values[k].item()
                     pa = pa_values[k].item()
-                    if pb < 1.0 - 1e-6:
+                    # if pb < 1.0 - 1e-6 and pa > 0:
+                    if pb < 0.5 and pa > 0:
                         gain = (pa - pb) / (1.0 - pb)
                         # print("pb:",pb)
                         # print("pa:",pa)
@@ -268,7 +269,7 @@ class KTLoss(nn.Module):
             y_true = real_answers[answer_mask].cpu().detach().numpy()
             y_pred = pred_answers[answer_mask].cpu().detach().numpy()
             auc = roc_auc_score(y_true, y_pred)
-            acc = accuracy_score(y_true, (y_pred >= 0.6).astype(int))  # 直接根据概率阈值计算ACC
+            acc = accuracy_score(y_true, (y_pred >= 0.5).astype(int))  # 直接根据概率阈值计算ACC
         except ValueError:
             auc, acc = -1, -1
 
