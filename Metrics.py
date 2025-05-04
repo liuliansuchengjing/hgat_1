@@ -124,7 +124,7 @@ class Metrics(object):
                     pb = pb_values[k].item()
                     pa = pa_values[k].item()
                     # if pb < 1.0 - 1e-6 and pa > 0:
-                    if (pb < 1.0 - 1e-6) and (pa > 0):
+                    if (pb < 0.8) and (pa > 0):
                         gain = (pa - pb) / (1.0 - pb)
                         # print("pb:",pb)
                         # print("pa:",pa)
