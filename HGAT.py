@@ -262,7 +262,7 @@ class MSHGAT(nn.Module):
         input_timestamp = input_timestamp[:, :-1]
         hidden = self.dropout(self.gnn(graph))
         memory_emb_list = self.hgnn(hidden, hypergraph_list)
-        pred_res, kt_mask, yt = self.ktmodel(hidden, original_input, ans)
+        pred_res, kt_mask, yt, _ = self.ktmodel(hidden, original_input, ans)
 
         batch_size, max_len = input.size()
 
@@ -349,5 +349,5 @@ class KTOnlyModel(nn.Module):
         # 通过 GNN 生成动态技能嵌入
         hidden = self.gnn(graph)
         # 仅运行 KT 模块
-        _, _, yt = self.ktmodel(hidden, input_seq, answers)
-        return yt
+        _, _, yt, yt_all = self.ktmodel(hidden, input_seq, answers)
+        return yt_all
