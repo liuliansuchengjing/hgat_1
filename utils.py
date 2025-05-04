@@ -79,7 +79,7 @@ def simulate_learning(kt_model, original_seqs, original_ans, topk_sequence, grap
     return torch.stack(yt_after_list, dim=1)  # 维度: [batch_size, seq_len-1, num_skills]
 
 
-def gain_test_epoch(model, kt_model, test_data, graph, hypergraph_list, kt_loss, k_list=[5, 10, 20], topnum=1):
+def gain_test_epoch(model, kt_model, test_data, graph, hypergraph_list, kt_loss, k_list=[5, 10, 20], topnum=2):
     model.eval()# 将模型设置为评估模式
     auc_test, acc_test = [], []
     scores = {'hits@' + str(k): 0.0 for k in k_list}
@@ -167,10 +167,10 @@ def gain_test_epoch(model, kt_model, test_data, graph, hypergraph_list, kt_loss,
             yt_after = simulate_learning(
                 kt_model, original_seqs, original_ans, topk_sequence, graph, yt_before, batch_size, topnum
             )  # 维度: [batch_size, seq_len-1, num_skills]
-            print("yt_before.size():",yt_before.size())
-            print("yt_before:",yt_before)
-            print("yt_after.size():",yt_after.size())
-            print("yt_after:",yt_after)
+            # print("yt_before.size():",yt_before.size())
+            # print("yt_before:",yt_before)
+            # print("yt_after.size():",yt_after.size())
+            # print("yt_after:",yt_after)
 
             # 计算有效性（仅当前时间步）
             batch_gain = metric.compute_effectiveness(
