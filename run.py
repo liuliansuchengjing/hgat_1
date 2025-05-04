@@ -141,7 +141,7 @@ def train_model(MSHGAT, data_path):
         kt_loss = kt_loss.cuda()
 
     validation_history = 0.0
-    his_auc = 5.0
+    his_auc = 0.0
     his_acc = 0.0
 
     best_scores = {}
