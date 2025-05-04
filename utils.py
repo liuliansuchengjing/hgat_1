@@ -146,7 +146,7 @@ def gain_test_epoch(model, kt_model, test_data, graph, hypergraph_list, kt_loss,
             # print("y_pred",y_pred.shape)# 维度: [batch_size, seq_len-1, num_users]
             # print("y_gold",y_gold.shape) # 维度: [(batch_size * (seq_len - 1))]
             scores_batch, topk_sequence, scores_len = metric.gaintest_compute_metric(
-                y_pred, y_gold, batch_size, seq_len, k_list, topnum - 1
+                y_pred, y_gold, batch_size, seq_len, k_list, topnum
             )
             # 累加有效的样本数
             total_valid_samples += scores_len
