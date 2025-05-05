@@ -327,7 +327,7 @@ class MSHGAT(nn.Module):
         mask = get_previous_user_mask(input.cpu(), self.n_node)
         pre = (pred + mask).view(-1, pred.size(-1)).cuda()
 
-        return pre, pred_res, kt_mask, yt
+        return pre, pred_res, kt_mask, yt, hidden
 
 
 class KTOnlyModel(nn.Module):
