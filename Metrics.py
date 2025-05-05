@@ -8,49 +8,8 @@ import networkx as nx
 import torch
 import torch.nn as nn
 from sklearn.metrics import roc_auc_score, accuracy_score
-
-
-def load_idx2u():
-    with open('/kaggle/working/GCN/data/r_MOOC10000/idx2u.pickle', 'rb') as f:
-        return pickle.load(f)
-
-
-def load_u2idx():
-    with open('/kaggle/working/GCN/data/r_MOOC10000/u2idx.pickle', 'rb') as f:
-        return pickle.load(f)
-
-
-def load_course_video():
-    data = {}
-    with open('/kaggle/input/riginmooccube/MOOCCube/relations/course-video.json', 'r', encoding='utf-8') as file:
-        reader = csv.reader(file, delimiter='\t')
-        for row in reader:
-            if len(row) == 2:
-                course_id, video_id = row
-                if course_id not in data:
-                    data[course_id] = []
-                data[course_id].append(video_id)
-    return data
-
-
-def load_course():
-    courses = []
-    with open('/kaggle/input/riginmooccube/MOOCCube/entities/course.json', 'r', encoding='utf-8') as f:
-        data = f.read()
-        start = 0
-        end = 0
-        while True:
-            start = data.find('{', end)
-            if start == - 1:
-                break
-            end = data.find('}', start) + 1
-            json_obj = data[start:end]
-            try:
-                course = json.loads(json_obj)
-                courses.append(course)
-            except json.decoder.JSONDecodeError as e:
-                print(f"解析错误: {e}")
-    return courses
+from dataLoader import Options
+import torch.nn.functional as F
 
 
 class Metrics(object):
@@ -71,6 +30,7 @@ class Metrics(object):
         # if not actual:
         # 	return 0.0
         return score / min(len(actual), k)
+
 
     def compute_metric(self, y_prob, y_true, k_list=[10, 50, 100]):
         '''
@@ -124,7 +84,7 @@ class Metrics(object):
                     pb = pb_values[k].item()
                     pa = pa_values[k].item()
                     # if pb < 1.0 - 1e-6 and pa > 0:
-                    if (pb < 0.8) and (pa > 0):
+                    if pb < 0.9 and pa > 0:
                         gain = (pa - pb) / (1.0 - pb)
                         # print("pb:",pb)
                         # print("pa:",pa)
@@ -194,6 +154,175 @@ class Metrics(object):
             topk_sequence.append(seq)  # 维度: [batch_size, seq_len-1, topnum]
 
         return scores, topk_sequence, valid_samples
+
+    def calculate_adaptivity(self, original_seqs, topk_sequence, data_name, T=10, epsilon=1e-5):
+        """
+        计算适应性表征参数（Adaptivity）
+
+        参数:
+            original_seqs: 原始序列列表 [batch_size, seq_len]
+            topk_sequence: 推荐序列列表 [batch_size, seq_len-1, K]
+            u2idx_path: u2idx.pickle文件路径
+            difficulty_path: difficulty.csv文件路径
+            T: 历史窗口大小
+            epsilon: 平滑项
+
+        返回:
+            adaptivity_scores: 每个样本的适应性分数列表
+        """
+        # 1. 加载u2idx映射和难度数据
+        options = Options(data_name)
+        with open(options.idx2u_dict, 'rb') as handle:
+            idx2u = pickle.load(handle)
+
+        # 加载难度数据
+            # 加载难度数据 - 修改为使用逗号分隔
+            difficulty_data = {}
+            with open(options.difficult_file, 'r') as f:
+                next(f)  # 跳过标题行
+                for line in f:
+                    line = line.strip()
+                    if not line:  # 跳过空行
+                        continue
+
+                    # 使用逗号分割
+                    parts = line.split(',')
+                    if len(parts) >= 1:
+                        challenge_id = parts[0].strip()
+                        diff = parts[1].strip()
+                        try:
+                            difficulty_data[int(challenge_id)] = int(diff)
+                        except (ValueError, IndexError):
+                            continue  # 跳过格式错误的行
+
+        # 2. 预处理函数：将习题ID转换为难度
+        def get_difficulty(idx):
+            """通过索引获取习题难度"""
+            challenge_id = int(idx2u[idx])  # 转换为原始ID
+            return difficulty_data.get(challenge_id, 1)  # 默认难度为1
+
+        # 3. 计算每个样本的适应性分数
+        adaptivity_scores = []
+        # 为每个推荐时间步计算适应性
+        adaptivity_sum = 0.0
+        valid_count = 0
+
+        for b in range(len(original_seqs)):
+            seq = original_seqs[b]
+            recs = topk_sequence[b]
+
+            # 获取历史答题记录（难度和结果）
+            history_diffs = []
+            history_results = []
+
+            # 遍历原始序列（去掉最后一个时间步，因为我们要预测它）
+            for t in range(len(seq) - 1):
+                challenge_idx = seq[t]
+                result = 1  # 假设所有历史答题结果都是正确的（根据原始代码逻辑）
+
+                # 获取难度
+                if challenge_idx > 2:
+                    diff = get_difficulty(challenge_idx)
+                    history_diffs.append(diff)
+                    history_results.append(result)
+
+
+            # 遍历推荐序列
+            for t in range(len(recs)):
+                # 计算当前时间步之前的能力值delta
+                if len(history_diffs[:t]) < T // 2:  # 如果历史数据小于窗口一半，使用默认值
+                    delta = 1.0
+                else:
+                    # 使用当前时间步之前的历史数据
+                    recent_diffs = history_diffs[max(0, t - T):t]
+                    recent_results = history_results[max(0, t - T):t]
+
+                    if len(recent_diffs) > 0:
+                        numerator = sum(d * r for d, r in zip(recent_diffs, recent_results))
+                        denominator = sum(recent_results) + epsilon
+                        delta = numerator / denominator
+                    else:
+                        delta = 1.0  # 默认能力值
+
+                # 计算当前时间步推荐资源的适应性
+                for rec in recs[t]:
+                    if rec > 1:
+                        # 获取推荐资源的难度
+                        rec_diff = get_difficulty(rec)
+                        # 计算1-|δ-Dif_i|
+                        adaptivity = 1 - abs(delta - rec_diff)
+                        adaptivity_sum += adaptivity
+                        valid_count += 1
+
+            # # 计算平均适应性
+            # if valid_count > 0:
+            #     adaptivity_scores.append(adaptivity_sum / valid_count)
+            # else:
+            #     adaptivity_scores.append(0.0)  # 无有效推荐时得分为0
+
+        return adaptivity_sum / valid_count if valid_count > 0 else 0.0
+
+    def calculate_diversity(self, topk_sequence, hidden, batch_size, seq_len, topnum):
+        """
+        计算多样性表征参数（Diversity）
+
+        参数:
+            topk_sequence: 推荐序列列表 [batch_size, seq_len-1, topnum]
+            hidden: GNN输出的嵌入向量 [num_skills, emb_dim]
+            batch_size: 批次大小
+            seq_len: 序列长度
+            topnum: 每个时间步推荐的资源数量
+
+        返回:
+            diversity_scores: 每个样本的多样性分数列表 [batch_size]
+        """
+        # 将topk_sequence转换为张量（如果还不是张量）
+        if not isinstance(topk_sequence, torch.Tensor):
+            topk_indices = torch.tensor(
+                [[rec + [0] * (topnum - len(rec)) for rec in sample] for sample in topk_sequence],
+                dtype=torch.long
+            ).cuda()
+        else:
+            topk_indices = topk_sequence
+
+        # 初始化结果存储
+        diversity_scores = torch.zeros(batch_size).cuda()
+        total_diversity = 0.0
+        valid_pairs = 0
+
+        for b in range(batch_size):
+            # 获取当前样本的所有推荐资源嵌入
+            rec_embeddings = hidden[topk_indices[b]]  # [seq_len-1, topnum, emb_dim]
+
+            # 遍历每个时间步的推荐
+            for t in range(seq_len - 1):
+                # 获取当前时间步的推荐资源嵌入
+                current_embs = rec_embeddings[t]  # [topnum, emb_dim]
+
+                # 计算所有资源对之间的相似度
+                for i in range(topnum):
+                    for j in range(i + 1, topnum):  # 避免重复计算
+                        # 跳过无效资源（PAD）
+                        if topk_indices[b, t, i] == 0 or topk_indices[b, t, j] == 0:
+                            continue
+
+                        # 计算余弦相似度
+                        sim = F.cosine_similarity(
+                            current_embs[i].unsqueeze(0),
+                            current_embs[j].unsqueeze(0)
+                        )
+
+                        # 累加多样性贡献
+                        total_diversity += (1 - sim.item())
+                        valid_pairs += 1
+
+            # 计算平均多样性
+            # if valid_pairs > 0:
+            #     diversity_scores[b] = total_diversity / valid_pairs
+            # else:
+            #     diversity_scores[b] = 0.0  # 无有效对时得分为0
+
+        return total_diversity / valid_pairs if valid_pairs > 0 else 0.0
 
 
 # Calculate accuracy of prediction result and its corresponding label
