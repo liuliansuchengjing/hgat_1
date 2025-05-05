@@ -1,23 +1,15 @@
-import argparse
-import time
 import numpy as np
 import Constants
 import torch
-import torch.nn as nn
 from graphConstruct import ConRelationGraph, ConHyperGraphList
 from dataLoader import Split_data, DataLoader
 from Metrics import Metrics, KTLoss
 from HGAT import MSHGAT, KTOnlyModel
 from Optim import ScheduledOptim
-import random
 
 # 初始化一个Metrics类的实例，用于后续的指标计算
 metric = Metrics()
 
-import torch
-import numpy as np
-from torch import nn
-from Metrics import Metrics  # 保持原有Metrics类基础结构
 
 def simulate_learning(kt_model, original_seqs, original_ans, topk_sequence, graph, yt_before, batch_size, K):
     """
@@ -41,8 +33,6 @@ def simulate_learning(kt_model, original_seqs, original_ans, topk_sequence, grap
             original_seq = original_seqs[b]  # 获取当前样本的原始序列, 维度: [original_seq_len]
             original_an = original_ans[b]
             recommended = topk_sequence[b][t]  # 获取当前时间步的推荐资源, 维度: [K]
-            random.seed(42) 
-            random.shuffle(recommended)  # 打乱顺序
             insert_pos = t + 1  # 插入位置（当前时间步之后）
             new_seq = original_seq[:insert_pos] + recommended# 构建新的序列，包含原始序列前t+1个元素和推荐的K个元素
 
@@ -82,13 +72,15 @@ def simulate_learning(kt_model, original_seqs, original_ans, topk_sequence, grap
     return torch.stack(yt_after_list, dim=1)  # 维度: [batch_size, seq_len-1, num_skills]
 
 
-def gain_test_epoch(model, kt_model, test_data, graph, hypergraph_list, kt_loss, k_list=[5, 10, 20], topnum=3):
+def gain_test_epoch(model, kt_model, test_data, graph, hypergraph_list, kt_loss, data_path, k_list=[5, 10, 20], topnum=2):
     model.eval()# 将模型设置为评估模式
     auc_test, acc_test = [], []
     scores = {'hits@' + str(k): 0.0 for k in k_list}
     scores.update({'map@' + str(k): 0.0 for k in k_list})
     total_valid_samples = 0 # 记录有效的样本总数
     total_gain = 0.0    # 有效性指标的累积值
+    total_diff = 0.0
+    total_div = 0.0
     total_valid_count = 0     # 有效的批次数量
 
     with torch.no_grad():    # 不进行梯度计算
@@ -98,45 +90,12 @@ def gain_test_epoch(model, kt_model, test_data, graph, hypergraph_list, kt_loss,
             tgt = tgt.cuda()
             ans = ans.cuda()
             # 前向传播，得到预测结果、预测资源、掩码和原始知识状态
-            pred, pred_res, kt_mask, yt_before = model(tgt, tgt_timestamp.cuda(), tgt_idx.cuda(), ans, graph, hypergraph_list)
+            pred, pred_res, kt_mask, yt_before, hidden = model(tgt, tgt_timestamp.cuda(), tgt_idx.cuda(), ans, graph, hypergraph_list)
             # pred维度: [batch_size*seq_len-1, num_users]
             # pred_res维度: [batch_size, seq_len]
             # kt_mask维度: [batch_size, seq_len]
             # yt_before维度: [batch_size, seq_len-1, num_skills]
-
-            # # 将数据转移到CPU并转换为NumPy
-            # tgt_np = tgt.cpu().numpy()  # [batch_size, seq_len]
-            # ans_np = ans.cpu().numpy()  # [batch_size, seq_len]
-            # yt_before_np = yt_before.cpu().numpy()  # [batch_size, seq_len-1, num_skills]
-            
-            # batch_size, seq_len = tgt_np.shape
-            
-            # # 遍历每个样本
-            # for b in range(batch_size):
-            #     print(f"\n=== Batch {i}, Sample {b} ===")
-            
-            #     # 打印 tgt 前10个时间步（题目ID）
-            #     print("[tgt] First 10 steps:", list(tgt_np[b, :10]))
-            
-            #     # 打印 ans 前10个时间步（答题结果）
-            #     print("[ans] First 10 steps:", list(ans_np[b, :10].round(2)))  # 保留两位小数
-            
-            #     # 打印 yt_before 中对应 tgt 的每个时间步的概率值
-            #     print("[yt_before] Corresponding skill probabilities:")
-            #     for t in range(10):
-            #         if t >= seq_len - 1:
-            #             break  # 避免越界（yt_before只有seq_len-1个时间步）
-            
-            #         for i in range(10):
-            #             # 获取当前时间步 t+1 的题目ID（因为 yt_before[t] 预测的是 t+1 的题目）
-            #             skill_id = tgt_np[b, i]
-            
-            #             # 跳过PAD或非法ID
-            #             if skill_id == Constants.PAD or skill_id >= yt_before_np.shape[2]:
-            #                 continue
-            #             prob = yt_before_np[b, t, skill_id]
-            #             print(f"{i}-{skill_id}:{prob:.4f}", end=" ")
-            #         print()
+            # hidden维度: [seq_len, num_skills]
 
             loss_kt, auc, acc = kt_loss(pred_res, ans, kt_mask)# 计算当前批次的AUC和ACC
             if auc != -1:    # 如果AUC计算成功，则将其添加到列表中
@@ -145,8 +104,8 @@ def gain_test_epoch(model, kt_model, test_data, graph, hypergraph_list, kt_loss,
 
             # 处理预测结果，生成TopK序列
             y_gold = tgt[:, 1:].contiguous().view(-1).cpu().numpy()  # 维度: [(batch_size * (seq_len - 1))]
-            y_pred = pred.detach().cpu().numpy()  # 维度: [batch_size*seq_len-1, num_users]
-            # print("y_pred",y_pred.shape)# 维度: [batch_size, seq_len-1, num_users]
+            y_pred = pred.detach().cpu().numpy()  # 维度: [batch_size*seq_len-1, num_skills]
+            # print("y_pred",y_pred.shape)# 维度: [batch_size, seq_len-1, num_skills]
             # print("y_gold",y_gold.shape) # 维度: [(batch_size * (seq_len - 1))]
             scores_batch, topk_sequence, scores_len = metric.gaintest_compute_metric(
                 y_pred, y_gold, batch_size, seq_len, k_list, topnum
@@ -180,6 +139,10 @@ def gain_test_epoch(model, kt_model, test_data, graph, hypergraph_list, kt_loss,
             )
             # 累加有效性指标
             total_gain += batch_gain
+            batch_adaptivity = metric.calculate_adaptivity(original_seqs, topk_sequence, data_path)
+            total_diff += batch_adaptivity
+            batch_diversity = metric.calculate_diversity(topk_indices, hidden, batch_size, seq_len, topnum)
+            total_div += batch_diversity
             # 累加有效的批次数量
             total_valid_count += 1
 
@@ -194,8 +157,10 @@ def gain_test_epoch(model, kt_model, test_data, graph, hypergraph_list, kt_loss,
 
     # 计算平均有效性
     E_p = total_gain / total_valid_count if total_valid_count > 0 else 0.0
+    Adaptivity = total_diff / total_valid_count if total_valid_count > 0 else 0.0
+    Diversity = total_div / total_valid_count if total_valid_count > 0 else 0.0
 
-    return scores, auc_test, acc_test, E_p
+    return scores, auc_test, acc_test, E_p, Adaptivity, Diversity
 
 
 def gain_test_model(model, data_path, opt):
@@ -228,8 +193,8 @@ def gain_test_model(model, data_path, opt):
     kt_model = KTOnlyModel(model)
 
     # 运行测试流程
-    scores, auc_test, acc_test, E_p = gain_test_epoch(
-        model, kt_model, test_data, relation_graph, hypergraph_list, kt_loss
+    scores, auc_test, acc_test, E_p, Adaptivity, Diversity = gain_test_epoch(
+        model, kt_model, test_data, relation_graph, hypergraph_list, kt_loss, data_path
     )
 
     # 打印结果
@@ -239,3 +204,5 @@ def gain_test_model(model, data_path, opt):
     print(f'AUC: {np.mean(auc_test):.4f}')
     print(f'ACC: {np.mean(acc_test):.4f}')
     print(f'Effectiveness (E_p): {E_p:.4f}')
+    print(f'Adaptivity : {Adaptivity:.4f}')
+    print(f'Diversity :{Diversity:.4f}')
