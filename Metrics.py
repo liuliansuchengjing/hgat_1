@@ -55,45 +55,6 @@ class Metrics(object):
         scores = {k: np.mean(v) for k, v in scores.items()}
         return scores, scores_len
 
-    # Metrics.py 的 compute_effectiveness 方法
-    def compute_effectiveness(self, yt_before, yt_after, inserted_lengths, topk_indices):
-        """
-        有效性计算（独立处理每个推荐资源）
-        输入维度说明：
-        yt_before: [B, seq_len, num_skills]（原始知识状态）
-        yt_after: [B, seq_len-1, num_skills]（每个时间步插入后的最终知识状态）
-        topk_indices: [B, seq_len-1, K]
-        """
-        batch_size, seq_len_minus_1, K = topk_indices.shape
-        total_gain = 0.0
-        valid_count = 0
-
-        for b in range(batch_size):
-            for t in range(seq_len_minus_1):
-                recommended = topk_indices[b, t].tolist()
-                valid_rec = [r for r in recommended if 0 <= r < yt_before.shape[2]]
-                if not valid_rec:
-                    continue
-
-                # 原始知识状态（时间步t）
-                pb_values = yt_before[b, t, valid_rec]  # [K_valid]
-                # 插入后的知识状态（时间步t+K）
-                pa_values = yt_after[b, t, valid_rec]  # [K_valid]
-
-                for k in range(len(valid_rec)):
-                    pb = pb_values[k].item()
-                    pa = pa_values[k].item()
-                    # if pb < 1.0 - 1e-6 and pa > 0:
-                    if pb < 0.9 and pa > 0:
-                        gain = (pa - pb) / (1.0 - pb)
-                        # print("pb:",pb)
-                        # print("pa:",pa)
-                        # print("----------")
-                        total_gain += gain
-                        valid_count += 1
-
-        return total_gain / valid_count if valid_count > 0 else 0.0
-
     def gaintest_compute_metric(self, y_prob, y_true, batch_size, seq_len, k_list=[10, 50, 100], topnum=5):
         # 初始化所有指标字典，用于存储hits@k和map@k的累积值
         scores = {'hits@' + str(k): 0.0 for k in k_list}
@@ -154,6 +115,45 @@ class Metrics(object):
             topk_sequence.append(seq)  # 维度: [batch_size, seq_len-1, topnum]
 
         return scores, topk_sequence, valid_samples
+
+    # Metrics.py 的 compute_effectiveness 方法
+    def compute_effectiveness(self, yt_before, yt_after, topk_indices):
+        """
+        有效性计算（独立处理每个推荐资源）
+        输入维度说明：
+        yt_before: [B, seq_len-1, num_skills]（原始知识状态）
+        yt_after: [B, seq_len-1, num_skills]（每个时间步插入后的最终知识状态）
+        topk_indices: [B, seq_len-1, K]
+        """
+        batch_size, seq_len_minus_1, K = topk_indices.shape
+        total_gain = 0.0
+        valid_count = 0
+
+        for b in range(batch_size):
+            for t in range(seq_len_minus_1):
+                recommended = topk_indices[b, t].tolist()
+                valid_rec = [r for r in recommended if 0 <= r < yt_before.shape[2]]
+                if not valid_rec:
+                    continue
+
+                # 原始知识状态（时间步t）
+                pb_values = yt_before[b, t, valid_rec]  # [K_valid]
+                # 插入后的知识状态（时间步t+K）
+                pa_values = yt_after[b, t, valid_rec]  # [K_valid]
+
+                for k in range(len(valid_rec)):
+                    pb = pb_values[k].item()
+                    pa = pa_values[k].item()
+                    # if pb < 1.0 - 1e-6 and pa > 0:
+                    if pb < 0.9 and pa > 0:
+                        gain = (pa - pb) / (1.0 - pb)
+                        # print("pb:",pb)
+                        # print("pa:",pa)
+                        # print("----------")
+                        total_gain += gain
+                        valid_count += 1
+
+        return total_gain / valid_count if valid_count > 0 else 0.0
 
     def calculate_adaptivity(self, original_seqs, topk_sequence, data_name, T=10, epsilon=1e-5):
         """
@@ -323,6 +323,131 @@ class Metrics(object):
             #     diversity_scores[b] = 0.0  # 无有效对时得分为0
 
         return total_diversity / valid_pairs if valid_pairs > 0 else 0.0
+
+    def combined_metrics(self, yt_before, yt_after, topk_sequence, original_seqs, hidden,
+                         data_name, batch_size, seq_len, topnum=5, T=10, epsilon=1e-5):
+        """
+        合并后的目标函数，同时计算有效性、适应性和多样性
+        输入维度说明：
+        yt_before: [B, seq_len, num_skills]
+        yt_after: [B, seq_len-1, num_skills]
+        topk_sequence: [B, seq_len-1, K]
+        original_seqs: [B, seq_len]
+        hidden: [num_skills, emb_dim]
+        """
+        # 初始化总和存储
+        metrics = {
+            'total_effectiveness': 0.0,
+            'total_adaptivity': 0.0,
+            'total_diversity': 0.0,
+            'step_records': defaultdict(list)  # 存储每个时间步的指标
+        }
+
+        # 预处理：加载难度数据和映射（移出循环）
+        options = Options(data_name)
+        with open(options.idx2u_dict, 'rb') as handle:
+            idx2u = pickle.load(handle)
+
+        # 加载难度数据
+        difficulty_data = {}
+        with open(options.difficult_file, 'r') as f:
+            next(f)
+            for line in f:
+                parts = line.strip().split(',')
+                if len(parts) >= 2:
+                    try:
+                        difficulty_data[int(parts[0])] = int(parts[1])
+                    except ValueError:
+                        continue
+
+        # 转换topk序列为张量
+        if not isinstance(topk_sequence, torch.Tensor):
+            topk_indices = torch.tensor(
+                [[rec + [0] * (topnum - len(rec)) for rec in sample] for sample in topk_sequence],
+                dtype=torch.long
+            ).cuda()
+        else:
+            topk_indices = topk_sequence
+
+        # 遍历每个样本和时间步
+        for b in range(batch_size):
+            seq = original_seqs[b]
+            recs = topk_indices[b]
+
+            # 初始化历史记录
+            history_diffs = []
+            history_results = []
+
+            for t in range(seq_len - 1):
+                # ========== 有效性计算 ==========
+                valid_rec = [r.item() for r in recs[t] if 0 <= r < yt_before.shape[2]]
+                if valid_rec:
+                    pb = yt_before[b, t, valid_rec]  # [K]
+                    pa = yt_after[b, t, valid_rec]  # [K]
+                    gain = 0.0
+                    valid = 0
+                    for k in range(len(valid_rec)):
+                        if pb[k] < 0.9 and pa[k] > 0:
+                            gain += (pa[k] - pb[k]) / (1.0 - pb[k])
+                            valid += 1
+                    if valid > 0:
+                        eff = gain / valid
+                        metrics['total_effectiveness'] += eff
+                        metrics['step_records'][(b, t)].append(eff)
+
+                # ========== 适应性计算 ==========
+                if t > 0:  # 需要历史记录
+                    recent_diffs = history_diffs[max(0, t - T):t]
+                    recent_results = history_results[max(0, t - T):t]
+                    delta = sum(d * r for d, r in zip(recent_diffs, recent_results)) / \
+                            (sum(recent_results) + epsilon) if recent_results else 1.0
+
+                    for rec in recs[t]:
+                        if rec > 1:
+                            try:
+                                rec_diff = difficulty_data[int(idx2u[rec.item()])]
+                                adapt = 1 - abs(delta - rec_diff)
+                                metrics['total_adaptivity'] += adapt
+                                metrics['step_records'][(b, t)].append(adapt)
+                            except KeyError:
+                                pass
+
+                # 更新历史记录
+                if seq[t] > 2:
+                    try:
+                        history_diffs.append(difficulty_data[int(idx2u[seq[t].item()])])
+                        history_results.append(1)  # 假设历史答题正确
+                    except KeyError:
+                        pass
+
+                # ========== 多样性计算 ==========
+                current_embs = hidden[recs[t]]  # [topnum, emb_dim]
+                pair_count = 0
+                div_sum = 0.0
+
+                for i in range(topnum):
+                    for j in range(i + 1, topnum):
+                        if recs[t, i] == 0 or recs[t, j] == 0:
+                            continue
+                        sim = F.cosine_similarity(
+                            current_embs[i].unsqueeze(0),
+                            current_embs[j].unsqueeze(0))
+                        div_sum += (1 - sim.item())
+                        pair_count += 1
+
+                        if pair_count > 0:
+                            metrics['total_diversity'] += div_sum / pair_count
+                        metrics['step_records'][(b, t)].append(div_sum / pair_count)
+
+                        # 计算均值
+                        total_steps = batch_size * (seq_len - 1)
+                        metrics.update({
+                            'effectiveness': metrics['total_effectiveness'] / total_steps,
+                            'adaptivity': metrics['total_adaptivity'] / total_steps,
+                            'diversity': metrics['total_diversity'] / total_steps,
+                        })
+
+        return metrics
 
 
 # Calculate accuracy of prediction result and its corresponding label
