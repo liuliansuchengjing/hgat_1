@@ -82,6 +82,12 @@ def gain_test_epoch(model, kt_model, test_data, graph, hypergraph_list, kt_loss,
     total_diff = 0.0
     total_div = 0.0
     total_valid_count = 0     # 有效的批次数量
+    # 训练/验证循环外部初始化累加器
+    total_metrics = {
+        'effectiveness': 0.0,
+        'adaptivity': 0.0,
+        'diversity': 0.0
+    }
 
     with torch.no_grad():    # 不进行梯度计算
         for i, batch in enumerate(test_data):  # 遍历测试数据的每个批次
@@ -145,6 +151,12 @@ def gain_test_epoch(model, kt_model, test_data, graph, hypergraph_list, kt_loss,
             total_div += batch_diversity
             # 累加有效的批次数量
             total_valid_count += 1
+            result = metric.combined_metrics( yt_before, yt_after, topk_sequence, original_seqs, hidden,
+                             data_path, batch_size, seq_len, topnum, T=10)
+            # 累加指标值
+            total_metrics['effectiveness'] += result['effectiveness']
+            total_metrics['adaptivity'] += result['adaptivity']
+            total_metrics['diversity'] += result['diversity']
 
     # 计算全局均值
     for k in k_list:
@@ -159,8 +171,13 @@ def gain_test_epoch(model, kt_model, test_data, graph, hypergraph_list, kt_loss,
     E_p = total_gain / total_valid_count if total_valid_count > 0 else 0.0
     Adaptivity = total_diff / total_valid_count if total_valid_count > 0 else 0.0
     Diversity = total_div / total_valid_count if total_valid_count > 0 else 0.0
+    # 计算全局平均值
+    final_metrics = {
+        k: v / total_valid_count
+        for k, v in total_metrics.items()
+    }
 
-    return scores, auc_test, acc_test, E_p, Adaptivity, Diversity
+    return scores, auc_test, acc_test, E_p, Adaptivity, Diversity, final_metrics
 
 
 def gain_test_model(model, data_path, opt):
@@ -193,7 +210,7 @@ def gain_test_model(model, data_path, opt):
     kt_model = KTOnlyModel(model)
 
     # 运行测试流程
-    scores, auc_test, acc_test, E_p, Adaptivity, Diversity = gain_test_epoch(
+    scores, auc_test, acc_test, E_p, Adaptivity, Diversity, final_metrics = gain_test_epoch(
         model, kt_model, test_data, relation_graph, hypergraph_list, kt_loss, data_path
     )
 
@@ -206,3 +223,6 @@ def gain_test_model(model, data_path, opt):
     print(f'Effectiveness (E_p): {E_p:.4f}')
     print(f'Adaptivity : {Adaptivity:.4f}')
     print(f'Diversity :{Diversity:.4f}')
+    print(f"全局有效性: {final_metrics['effectiveness']:.4f}")
+    print(f"全局适应性: {final_metrics['adaptivity']:.4f}")
+    print(f"全局多样性: {final_metrics['diversity']:.4f}")
