@@ -140,7 +140,6 @@ def gain_test_epoch(model, kt_model, test_data, graph, hypergraph_list, kt_loss,
             batch_gain = metric.compute_effectiveness(
                 yt_before,  # [batch_size, seq_len-1, num_skills]
                 yt_after,  # [batch_size, seq_len-1, num_skills]
-                torch.zeros(batch_size, dtype=torch.long),  # 不需要插入长度累积 [batch_size]
                 topk_indices  # [batch_size, seq_len-1, topnum]
             )
             # 累加有效性指标
