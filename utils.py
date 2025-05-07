@@ -137,7 +137,7 @@ def gain_test_epoch(model, kt_model, test_data, graph, hypergraph_list, kt_loss,
             )  # 维度: [batch_size, seq_len-1, num_skills]
 
             # 计算有效性（仅当前时间步）
-            batch_gain = metric.compute_effectiveness(
+            batch_gain = metric.compute_effectiveness(original_seqs,
                 yt_before,  # [batch_size, seq_len-1, num_skills]
                 yt_after,  # [batch_size, seq_len-1, num_skills]
                 topk_indices  # [batch_size, seq_len-1, topnum]
@@ -146,11 +146,11 @@ def gain_test_epoch(model, kt_model, test_data, graph, hypergraph_list, kt_loss,
             total_gain += batch_gain
             batch_adaptivity = metric.calculate_adaptivity(original_seqs, topk_sequence, data_path)
             total_diff += batch_adaptivity
-            batch_diversity = metric.calculate_diversity(topk_indices, hidden, batch_size, seq_len, topnum)
+            batch_diversity = metric.calculate_diversity(original_seqs,topk_indices, hidden, batch_size, seq_len, topnum)
             total_div += batch_diversity
             # 累加有效的批次数量
             total_valid_count += 1
-            result = metric.combined_metrics( yt_before, yt_after, topk_sequence, original_seqs, hidden,
+            result = metric.combined_metrics(yt_before, yt_after, topk_sequence, original_seqs, hidden,
                              data_path, batch_size, seq_len, topnum, T=10)
             # 累加指标值
             total_metrics['effectiveness'] += result['effectiveness']
