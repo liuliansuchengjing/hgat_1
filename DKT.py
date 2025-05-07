@@ -51,7 +51,7 @@ class DKT(nn.Module):
 class HGKT(nn.Module):
 
     def __init__(self, emb_dim, hidden_dim, num_skills, dropout=0.2, bias=True):
-        super(DKT, self).__init__()
+        super(HGKT, self).__init__()
         self.emb_dim = emb_dim  # 嵌入维度
         self.hidden_dim = hidden_dim
         self.bias = bias
