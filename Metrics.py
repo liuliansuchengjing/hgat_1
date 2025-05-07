@@ -117,7 +117,7 @@ class Metrics(object):
         return scores, topk_sequence, valid_samples
 
     # Metrics.py 的 compute_effectiveness 方法
-    def compute_effectiveness(self, yt_before, yt_after, topk_indices):
+    def compute_effectiveness(self,original_seqs, yt_before, yt_after, topk_indices):
         """
         有效性计算（独立处理每个推荐资源）
         输入维度说明：
@@ -131,27 +131,27 @@ class Metrics(object):
 
         for b in range(batch_size):
             for t in range(seq_len_minus_1):
-                recommended = topk_indices[b, t].tolist()
-                valid_rec = [r for r in recommended if 0 <= r < yt_before.shape[2]]
-                if not valid_rec:
-                    continue
+                if original_seqs[b][t] != self.PAD:
+                    recommended = topk_indices[b, t].tolist()
+                    valid_rec = [r for r in recommended if 0 <= r < yt_before.shape[2]]
+                    if not valid_rec:
+                        continue
 
-                # 原始知识状态（时间步t）
-                pb_values = yt_before[b, t, valid_rec]  # [K_valid]
-                # 插入后的知识状态（时间步t+K）
-                pa_values = yt_after[b, t, valid_rec]  # [K_valid]
+                    # 原始知识状态（时间步t）
+                    pb_values = yt_before[b, t, valid_rec]  # [K_valid]
+                    # 插入后的知识状态（时间步t+K）
+                    pa_values = yt_after[b, t, valid_rec]  # [K_valid]
 
-                for k in range(len(valid_rec)):
-                    pb = pb_values[k].item()
-                    pa = pa_values[k].item()
-                    # if pb < 1.0 - 1e-6 and pa > 0:
-                    if pb < 0.9 and pa > 0:
-                        gain = (pa - pb) / (1.0 - pb)
-                        # print("pb:",pb)
-                        # print("pa:",pa)
-                        # print("----------")
-                        total_gain += gain
-                        valid_count += 1
+                    if valid_rec:
+                        for k in range(len(valid_rec)):
+                            pb = pb_values[k].item()
+                            pa = pa_values[k].item()
+                            # if pb < 1.0 - 1e-6 and pa > 0:
+                            if pb < 0.9 and pa > 0:
+                                gain = (pa - pb) / (1.0 - pb)
+                                total_gain += gain
+                                valid_count += 1
+
 
         return total_gain / valid_count if valid_count > 0 else 0.0
 
@@ -175,25 +175,24 @@ class Metrics(object):
         with open(options.idx2u_dict, 'rb') as handle:
             idx2u = pickle.load(handle)
 
-        # 加载难度数据
-            # 加载难度数据 - 修改为使用逗号分隔
-            difficulty_data = {}
-            with open(options.difficult_file, 'r') as f:
-                next(f)  # 跳过标题行
-                for line in f:
-                    line = line.strip()
-                    if not line:  # 跳过空行
-                        continue
+        # 加载难度数据 - 修改为使用逗号分隔
+        difficulty_data = {}
+        with open(options.difficult_file, 'r') as f:
+            next(f)  # 跳过标题行
+            for line in f:
+                line = line.strip()
+                if not line:  # 跳过空行
+                    continue
 
-                    # 使用逗号分割
-                    parts = line.split(',')
-                    if len(parts) >= 1:
-                        challenge_id = parts[0].strip()
-                        diff = parts[1].strip()
-                        try:
-                            difficulty_data[int(challenge_id)] = int(diff)
-                        except (ValueError, IndexError):
-                            continue  # 跳过格式错误的行
+                # 使用逗号分割
+                parts = line.split(',')
+                if len(parts) >= 1:
+                    challenge_id = parts[0].strip()
+                    diff = parts[1].strip()
+                    try:
+                        difficulty_data[int(challenge_id)] = int(diff)
+                    except (ValueError, IndexError):
+                        continue  # 跳过格式错误的行
 
         # 2. 预处理函数：将习题ID转换为难度
         def get_difficulty(idx):
@@ -221,7 +220,7 @@ class Metrics(object):
                 result = 1  # 假设所有历史答题结果都是正确的（根据原始代码逻辑）
 
                 # 获取难度
-                if challenge_idx > 2:
+                if challenge_idx > 1:
                     diff = get_difficulty(challenge_idx)
                     history_diffs.append(diff)
                     history_results.append(result)
@@ -262,7 +261,7 @@ class Metrics(object):
 
         return adaptivity_sum / valid_count if valid_count > 0 else 0.0
 
-    def calculate_diversity(self, topk_sequence, hidden, batch_size, seq_len, topnum):
+    def calculate_diversity(self, original_seqs, topk_sequence, hidden, batch_size, seq_len, topnum):
         """
         计算多样性表征参数（Diversity）
 
@@ -279,7 +278,7 @@ class Metrics(object):
         # 将topk_sequence转换为张量（如果还不是张量）
         if not isinstance(topk_sequence, torch.Tensor):
             topk_indices = torch.tensor(
-                [[rec + [0] * (topnum - len(rec)) for rec in sample] for sample in topk_sequence],
+                [[rec + [self.PAD] * (topnum - len(rec)) for rec in sample] for sample in topk_sequence],
                 dtype=torch.long
             ).cuda()
         else:
@@ -296,25 +295,27 @@ class Metrics(object):
 
             # 遍历每个时间步的推荐
             for t in range(seq_len - 1):
-                # 获取当前时间步的推荐资源嵌入
-                current_embs = rec_embeddings[t]  # [topnum, emb_dim]
+                if original_seqs[b][t] != self.PAD:
+                    # 获取当前时间步的推荐资源嵌入
+                    current_embs = rec_embeddings[t]  # [topnum, emb_dim]
 
-                # 计算所有资源对之间的相似度
-                for i in range(topnum):
-                    for j in range(i + 1, topnum):  # 避免重复计算
-                        # 跳过无效资源（PAD）
-                        if topk_indices[b, t, i] == 0 or topk_indices[b, t, j] == 0:
-                            continue
+                    # 计算所有资源对之间的相似度
+                    for i in range(topnum):
+                        for j in range(i + 1, topnum):  # 避免重复计算
+                            # 跳过无效资源（PAD）
+                            if topk_indices[b, t, i] == 0 or topk_indices[b, t, j] == 0:
+                                continue
 
-                        # 计算余弦相似度
-                        sim = F.cosine_similarity(
-                            current_embs[i].unsqueeze(0),
-                            current_embs[j].unsqueeze(0)
-                        )
+                            # 计算余弦相似度
+                            sim = F.cosine_similarity(
+                                current_embs[i].unsqueeze(0),
+                                current_embs[j].unsqueeze(0)
+                            )
 
-                        # 累加多样性贡献
-                        total_diversity += (1 - sim.item())
-                        valid_pairs += 1
+                            # 累加多样性贡献
+                            total_diversity += (1 - sim.item())
+                            valid_pairs += 1
+
 
             # 计算平均多样性
             # if valid_pairs > 0:
@@ -342,6 +343,10 @@ class Metrics(object):
             'total_diversity': 0.0,
             'step_records': defaultdict(list)  # 存储每个时间步的指标
         }
+        valid_count = 0
+        eff_valid_count = 0
+        ada_valid_count = 0
+        div_valid_count = 0
 
         # 预处理：加载难度数据和映射（移出循环）
         options = Options(data_name)
@@ -360,10 +365,15 @@ class Metrics(object):
                     except ValueError:
                         continue
 
+        def get_difficulty(idx):
+            """通过索引获取习题难度"""
+            challenge_id = int(idx2u[idx])  # 转换为原始ID
+            return difficulty_data.get(challenge_id, 1)  # 默认难度为1
+
         # 转换topk序列为张量
         if not isinstance(topk_sequence, torch.Tensor):
             topk_indices = torch.tensor(
-                [[rec + [0] * (topnum - len(rec)) for rec in sample] for sample in topk_sequence],
+                [[rec + [self.PAD] * (topnum - len(rec)) for rec in sample] for sample in topk_sequence],
                 dtype=torch.long
             ).cuda()
         else:
@@ -378,10 +388,25 @@ class Metrics(object):
             history_diffs = []
             history_results = []
 
+            # 遍历原始序列（去掉最后一个时间步，因为我们要预测它）
+            for t in range(len(seq) - 1):
+                challenge_idx = seq[t]
+                result = 1  # 假设所有历史答题结果都是正确的（根据原始代码逻辑）
+
+                # 获取难度
+                if challenge_idx > 1:
+                    diff = get_difficulty(challenge_idx)
+                    history_diffs.append(diff)
+                    history_results.append(result)
+
             for t in range(seq_len - 1):
+                if original_seqs[b][t] == self.PAD:
+                    continue;
                 # ========== 有效性计算 ==========
+                valid_count += 1
                 valid_rec = [r.item() for r in recs[t] if 0 <= r < yt_before.shape[2]]
                 if valid_rec:
+
                     pb = yt_before[b, t, valid_rec]  # [K]
                     pa = yt_after[b, t, valid_rec]  # [K]
                     gain = 0.0
@@ -394,31 +419,33 @@ class Metrics(object):
                         eff = gain / valid
                         metrics['total_effectiveness'] += eff
                         metrics['step_records'][(b, t)].append(eff)
+                        eff_valid_count += 1
 
                 # ========== 适应性计算 ==========
-                if t > 0:  # 需要历史记录
+                if t >= 0:  # 需要历史记录
                     recent_diffs = history_diffs[max(0, t - T):t]
                     recent_results = history_results[max(0, t - T):t]
-                    delta = sum(d * r for d, r in zip(recent_diffs, recent_results)) / \
-                            (sum(recent_results) + epsilon) if recent_results else 1.0
+                    if t == 0:
+                        delta = 1.0
+                    else:
+                        delta = sum(d * r for d, r in zip(recent_diffs, recent_results)) / \
+                                (sum(recent_results) + epsilon) if recent_results else 1.0
 
+                    adapt_sum = 0.0
+                    dif_valid = 0
                     for rec in recs[t]:
                         if rec > 1:
                             try:
                                 rec_diff = difficulty_data[int(idx2u[rec.item()])]
                                 adapt = 1 - abs(delta - rec_diff)
-                                metrics['total_adaptivity'] += adapt
-                                metrics['step_records'][(b, t)].append(adapt)
+                                dif_valid += 1
+                                adapt_sum += adapt
+
                             except KeyError:
                                 pass
-
-                # 更新历史记录
-                if seq[t] > 2:
-                    try:
-                        history_diffs.append(difficulty_data[int(idx2u[seq[t].item()])])
-                        history_results.append(1)  # 假设历史答题正确
-                    except KeyError:
-                        pass
+                    metrics['total_adaptivity'] += adapt
+                    metrics['step_records'][(b, t)].append(adapt)
+                    ada_valid_count += 1
 
                 # ========== 多样性计算 ==========
                 current_embs = hidden[recs[t]]  # [topnum, emb_dim]
@@ -435,17 +462,18 @@ class Metrics(object):
                         div_sum += (1 - sim.item())
                         pair_count += 1
 
-                        if pair_count > 0:
-                            metrics['total_diversity'] += div_sum / pair_count
-                        metrics['step_records'][(b, t)].append(div_sum / pair_count)
+                if pair_count > 0:
+                    div_valid_count += 1
+                    metrics['total_diversity'] += div_sum / pair_count
+                    metrics['step_records'][(b, t)].append(div_sum / pair_count)
 
                         # 计算均值
-                        total_steps = batch_size * (seq_len - 1)
-                        metrics.update({
-                            'effectiveness': metrics['total_effectiveness'] / total_steps,
-                            'adaptivity': metrics['total_adaptivity'] / total_steps,
-                            'diversity': metrics['total_diversity'] / total_steps,
-                        })
+
+        metrics.update({
+            'effectiveness': metrics['total_effectiveness'] / eff_valid_count,
+            'adaptivity': metrics['total_adaptivity'] / ada_valid_count,
+            'diversity': metrics['total_diversity'] / div_valid_count,
+        })
 
         return metrics
 
