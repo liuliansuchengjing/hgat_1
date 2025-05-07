@@ -9,7 +9,7 @@ import torch.nn.init as init
 import Constants
 from TransformerBlock import TransformerBlock
 from torch.autograd import Variable
-from DKT import DKT
+from DKT import DKT,HGKT
 
 
 class HGNN_conv(nn.Module):
@@ -234,7 +234,8 @@ class MSHGAT(nn.Module):
         )
 
         self.num_skills = opt.user_size
-        self.ktmodel = DKT(self.hidden_size, self.hidden_size, self.num_skills, dropout=dropout)
+        self.ktmodel = HGKT(self.hidden_size, self.hidden_size, self.num_skills, dropout=dropout)
+        self.fc = nn.Linear(self.hidden_size, self.num_skills)
 
     def reset_parameters(self):
         stdv = 1.0 / math.sqrt(self.hidden_size)
@@ -257,12 +258,13 @@ class MSHGAT(nn.Module):
     def forward(self, input, input_timestamp, input_idx, ans, graph, hypergraph_list):
 
         original_input = input
-        input = input[:, :-1]
+        kt_mask = (original_input[:, 1:] >= 2).float()
+        # input = input[:, :-1]
 
         input_timestamp = input_timestamp[:, :-1]
         hidden = self.dropout(self.gnn(graph))
         memory_emb_list = self.hgnn(hidden, hypergraph_list)
-        pred_res, kt_mask, yt, _ = self.ktmodel(hidden, original_input, ans)
+        # pred_res, kt_mask, yt, _ = self.ktmodel(hidden, original_input, ans)
 
         batch_size, max_len = input.size()
 
@@ -310,13 +312,12 @@ class MSHGAT(nn.Module):
                 sub_emb = F.embedding(sub_input.cuda(), list(memory_emb_list.values())[ind][0].cuda())
                 sub_emb[temp] = 0
 
-                all_emb = F.embedding(input.cuda(), list(memory_emb_list.values())[ind][2].cuda())
-
                 dyemb += sub_emb
                 cas_emb += sub_cas
 
         item_emb, h_t1 = self.gru1(dyemb)  #
         pos_emb, h_t2 = self.gru2(cas_emb)  #
+        pred_res, kt_mask, yt, _ = self.ktmodel(pos_emb, original_input, ans)
         input_emb = item_emb + pos_emb  #
         input_emb = self.LayerNorm(input_emb)  #
         input_emb = self.dropout(input_emb)  #
@@ -324,9 +325,12 @@ class MSHGAT(nn.Module):
         trm_output = self.trm_encoder(input_emb, extended_attention_mask,
                                       output_all_encoded_layers=False)  # input_emb->dyemb
         pred = self.pred(trm_output)
+        input = input[:, :-1]
+        pred = pred[:, :-1, :]
         mask = get_previous_user_mask(input.cpu(), self.n_node)
         pre = (pred + mask).view(-1, pred.size(-1)).cuda()
 
+        # return pre, pred_res, kt_mask, yt, hidden, yt_hgat
         return pre, pred_res, kt_mask, yt, hidden
 
 
