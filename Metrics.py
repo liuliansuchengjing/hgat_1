@@ -10,6 +10,7 @@ import torch.nn as nn
 from sklearn.metrics import roc_auc_score, accuracy_score
 from dataLoader import Options
 import torch.nn.functional as F
+from deap import base, creator, tools, algorithms
 
 
 class Metrics(object):
@@ -476,8 +477,6 @@ class Metrics(object):
         })
 
         return metrics
-
-
 # Calculate accuracy of prediction result and its corresponding label
 # output: tensor, labels: tensor
 def accuracy(output, labels):
@@ -511,5 +510,114 @@ class KTLoss(nn.Module):
         loss = valid_loss.sum() / answer_mask.float().sum()  # 仅对有效位置求平均
 
         return loss, auc, acc
+
+
+
+class MultiObjectiveOptimizer:
+    def __init__(self, model, metrics, candidate_matrix, topk_sequence,
+                 obj_weights=[0.4, 0.3, 0.3], population_size=50,
+                 generations=20, cxpb=0.7, mutpb=0.3):
+        """
+        多目标优化器
+        :param candidate_matrix: 候选矩阵 [B, T, C]
+        :param topk_sequence: 原始topk序列 [B, T, K]
+        :param obj_weights: 目标权重 [effectiveness, adaptivity, diversity]
+        """
+        self.model = model
+        self.metrics = metrics
+        self.candidate_matrix = candidate_matrix.cpu().numpy()
+        self.topk_sequence = topk_sequence.cpu().numpy()
+        self.obj_weights = obj_weights
+        self.pop_size = population_size
+        self.generations = generations
+        self.cxpb = cxpb
+        self.mutpb = mutpb
+
+        # 遗传算法参数
+        self.batch_size, self.seq_len, self.k = topk_sequence.shape
+        self.candidate_size = candidate_matrix.shape[2]
+
+        # 初始化遗传算法框架
+        creator.create("FitnessMulti", base.Fitness, weights=(1.0, 1.0, 1.0))
+        creator.create("Individual", np.ndarray, fitness=creator.FitnessMulti)
+
+        self.toolbox = base.Toolbox()
+        self._setup_genetic_operators()
+
+    def _setup_genetic_operators(self):
+        """初始化遗传算子"""
+        # 基因编码：每个时间步选择来自topk(0)或候选矩阵(1)
+        self.toolbox.register("attr_bool", np.random.randint, 0, 2)
+
+        # 个体生成：三维数组 [T, K]
+        self.toolbox.register("individual", tools.initRepeat,
+                              creator.Individual,
+                              self.toolbox.attr_bool,
+                              n=self.seq_len * self.k)
+
+        # 种群生成
+        self.toolbox.register("population", tools.initRepeat,
+                              list, self.toolbox.individual)
+
+        # 遗传算子
+        self.toolbox.register("evaluate", self._fitness)
+        self.toolbox.register("mate", tools.cxTwoPoint)
+        self.toolbox.register("mutate", tools.mutFlipBit, indpb=0.05)
+        self.toolbox.register("select", tools.selNSGA2)
+
+    def _decode_individual(self, individual):
+        """解码个体为推荐序列"""
+        decoded = np.zeros_like(self.topk_sequence)
+        mask = individual.reshape(self.seq_len, self.k)
+
+        for t in range(self.seq_len):
+            for k in range(self.k):
+                if mask[t, k] == 0:  # 选择topk
+                    decoded[:, t, k] = self.topk_sequence[:, t, k]
+                else:  # 选择候选
+                    candidate_idx = np.random.randint(self.candidate_size)
+                    decoded[:, t, k] = self.candidate_matrix[:, t, candidate_idx]
+        return torch.tensor(decoded).cuda()
+
+    def _fitness(self, individual):
+        """计算适应度"""
+        # 生成推荐序列
+        rec_sequence = self._decode_individual(individual)
+
+        # 计算多目标指标
+        metrics = self.metrics.combined_metrics(
+            yt_before, yt_after, rec_sequence,
+            original_seqs, hidden, data_name,
+            self.batch_size, self.seq_len
+        )
+
+        return (metrics['effectiveness'],
+                metrics['adaptivity'],
+                metrics['diversity'])
+
+    def optimize(self):
+        """执行优化过程"""
+        pop = self.toolbox.population(n=self.pop_size)
+
+        # 进化算法参数
+        stats = tools.Statistics(lambda ind: ind.fitness.values)
+        stats.register("avg", np.mean, axis=0)
+        stats.register("std", np.std, axis=0)
+        stats.register("min", np.min, axis=0)
+        stats.register("max", np.max, axis=0)
+
+        # 执行进化
+        pop, logbook = algorithms.eaMuPlusLambda(
+            pop, self.toolbox,
+            mu=self.pop_size,
+            lambda_=2 * self.pop_size,
+            cxpb=self.cxpb, mutpb=self.mutpb,
+            ngen=self.generations, stats=stats,
+            verbose=True
+        )
+
+        # 选择最优个体
+        best_ind = tools.selBest(pop, 1)[0]
+        return self._decode_individual(best_ind), logbook
 
 ########
