@@ -85,15 +85,16 @@ def train_epoch(model, training_data, graph, hypergraph_list, loss_func, kt_loss
         # training
         optimizer.zero_grad()
         # pred= model(tgt, tgt_timestamp, tgt_idx, ans, graph, hypergraph_list)
-        pred, pred_res, kt_mask, yt, hidden = model(tgt, tgt_timestamp, tgt_idx, ans, graph,
+        pred, pred_res, kt_mask, yt = model(tgt, tgt_timestamp, tgt_idx, ans, graph,
                                         hypergraph_list)  # ==================================
 
         # loss
         loss, n_correct = get_performance(loss_func, pred, gold)
         loss_kt, auc, acc = kt_loss(pred_res, ans,
                                     kt_mask)  # ============================================================================
-        loss = loss + loss_kt*4000
+        # print("loss:", loss)
         # print("loss_kt:", loss_kt)
+        loss = loss + loss_kt*40000
 
         loss.backward()
 
@@ -175,7 +176,7 @@ def train_model(MSHGAT, data_path):
                 print(metric + ' ' + str(scores[metric]))
             print('auc_test: {:.10f}'.format(np.mean(auc_test)),
                   'acc_test: {:.10f}'.format(np.mean(acc_test)))
-            if (validation_history <= sum(scores.values())) and (his_auc<=(np.mean(auc_test)) + 0.02) and (his_acc <=(np.mean(acc_test)) + 0.02):
+            if (validation_history <= sum(scores.values())) and ((his_auc<=(np.mean(auc_test))) or (his_acc <=(np.mean(acc_test)))):
                 print("Best Validation hit@100:{} at Epoch:{}".format(scores["hits@20"], epoch_i))
                 validation_history = sum(scores.values())
                 his_auc = np.mean(auc_test)
@@ -212,7 +213,7 @@ def test_epoch(model, validation_data, graph, hypergraph_list, kt_loss, k_list=[
 
             # forward
             # pred = model(tgt, tgt_timestamp, tgt_idx, ans, graph, hypergraph_list)
-            pred, pred_res, kt_mask, yt, hidden = model(tgt, tgt_timestamp, tgt_idx, ans, graph,
+            pred, pred_res, kt_mask, yt = model(tgt, tgt_timestamp, tgt_idx, ans, graph,
                                             hypergraph_list)  # ==================================
             y_pred = pred.detach().cpu().numpy()
             loss_kt, auc, acc = kt_loss(pred_res.cpu(), ans.cpu(),
@@ -263,7 +264,7 @@ def test_model(MSHGAT, data_path):
 
 if __name__ == "__main__":
     model = MSHGAT
-    train_model(model, opt.data_name)
+    # train_model(model, opt.data_name)
     # test_model(model, opt.data_name)
     # gain_test_model(model, opt.data_name, opt)
-    # gain_test_model(model, opt.data_name, opt)
+    gain_test_model(model, opt.data_name, opt)
