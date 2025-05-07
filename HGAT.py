@@ -261,7 +261,7 @@ class MSHGAT(nn.Module):
         kt_mask = (original_input[:, 1:] >= 2).float()
         # input = input[:, :-1]
 
-        input_timestamp = input_timestamp[:, :-1]
+        # input_timestamp = input_timestamp[:, :-1]
         hidden = self.dropout(self.gnn(graph))
         memory_emb_list = self.hgnn(hidden, hypergraph_list)
         # pred_res, kt_mask, yt, _ = self.ktmodel(hidden, original_input, ans)
