@@ -92,7 +92,7 @@ def train_epoch(model, training_data, graph, hypergraph_list, loss_func, kt_loss
         loss, n_correct = get_performance(loss_func, pred, gold)
         loss_kt, auc, acc = kt_loss(pred_res, ans,
                                     kt_mask)  # ============================================================================
-        loss = loss + loss_kt*3
+        loss = loss + loss_kt*4000
         # print("loss_kt:", loss_kt)
 
         loss.backward()
@@ -175,7 +175,7 @@ def train_model(MSHGAT, data_path):
                 print(metric + ' ' + str(scores[metric]))
             print('auc_test: {:.10f}'.format(np.mean(auc_test)),
                   'acc_test: {:.10f}'.format(np.mean(acc_test)))
-            if (validation_history <= sum(scores.values())) and (his_auc<=(np.mean(auc_test))) and (his_acc <=(np.mean(acc_test))):
+            if (validation_history <= sum(scores.values())) and (his_auc<=(np.mean(auc_test)) + 0.02) and (his_acc <=(np.mean(acc_test)) + 0.02):
                 print("Best Validation hit@100:{} at Epoch:{}".format(scores["hits@20"], epoch_i))
                 validation_history = sum(scores.values())
                 his_auc = np.mean(auc_test)
