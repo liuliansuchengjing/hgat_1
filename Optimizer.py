@@ -2,6 +2,8 @@ import numpy as np
 import torch
 from collections import defaultdict
 from sklearn.metrics.pairwise import cosine_similarity
+
+import Constants
 from dataLoader import Options
 import pickle
 import csv
@@ -112,10 +114,12 @@ class NSGA2Optimizer:
         self.mutation_prob = mutation_prob
 
     def initialize_population(self, population_size):
-
         populations = {}
         for b in range(self.problem.batch_size):
             for t in range(self.problem.seq_len - 1):
+                if self.problem.original_seqs[b][t] == Constants.PAD:
+                    populations[(b, t)] = []
+                    continue
                 # 直接使用 Tensor 索引，并转换为列表
                 original = self.problem.topk_indices[b, t].tolist()
                 original = list(dict.fromkeys(original))  # 去重
@@ -267,6 +271,9 @@ class NSGA2Optimizer:
         all_fronts = {}
 
         for (b, t) in all_populations:
+            if self.problem.original_seqs[b][t] == Constants.PAD:
+                all_fronts[(b, t)] = []
+                continue
             population = all_populations[(b, t)]
             front_history = []
 
