@@ -296,7 +296,7 @@ class NSGA2Optimizer:
                 population = new_population + offspring
 
                 # 每10代检查收敛
-                if gen % 10 == 0 and gen > 0:
+                if gen % 3 == 0 and gen > 0:
                     current_front = self.get_pareto_front(population, b, t)
                     current_front_fitness = [self.evaluate_individual(ind, b, t) for ind in current_front]
                     if self.check_convergence(front_history, current_front_fitness, convergence_thresh):
