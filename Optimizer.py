@@ -322,7 +322,7 @@ class NSGA2Optimizer:
                     current_front = self.get_pareto_front(population, b, t)
                     current_front_fitness = [self.evaluate_individual(ind, b, t) for ind in current_front]
                     if self.check_convergence(front_history, current_front_fitness, convergence_thresh):
-                        print(f"batch {b}, time_step {t} 在第{gen}代收敛!")
+                        # print(f"batch {b}, time_step {t} 在第{gen}代收敛!")
                         break
                     front_history.append(current_front_fitness)
 
