@@ -179,7 +179,7 @@ class NSGA2Optimizer:
         input_seq = self.problem.original_seqs[batch_idx][:time_step + 1] + recommended
         # 使用 yt_before 模拟答题结果，大于0.5视为正确
         answer_seq = self.problem.anslist[batch_idx][:time_step + 1]  # 历史答案
-        current_probs = current_state[batch_idx, time_step, recommended].cpu().numpy()  # 推荐资源的预测概率
+        current_probs = self.problem.yt_before[batch_idx, time_step, recommended].cpu().numpy()  # 推荐资源的预测概率
         answer_seq += [1 if prob > 0.5 else 0 for prob in current_probs]  # 模拟推荐资源答案
 
         # 转换为张量
@@ -319,7 +319,7 @@ class NSGA2Optimizer:
                 population = new_population + offspring
 
                 # 每10代检查收敛
-                if gen % 4 == 0 and gen > 0:
+                if gen % 3 == 0 and gen > 0:
                     current_front = self.get_pareto_front(population, b, t)
                     current_front_fitness = [self.evaluate_individual(ind, b, t) for ind in current_front]
                     if self.check_convergence(front_history, current_front_fitness, convergence_thresh):
@@ -523,53 +523,6 @@ class NSGA2Optimizer:
 
         return np.column_stack([effectiveness, adaptivity, diversity, accuracy])
 
-    def batch_evaluate(self, population, batch_idx, time_step):
-        """批量评估种群"""
-        # 批量模拟知识状态
-        yt_after_batch = self.batch_simulate(batch_idx, time_step, population)
-
-        # 预计算公共参数
-        yt_before = self.problem.yt_before[batch_idx, time_step].cpu().numpy()
-        resource_diff = self.problem.resource_difficulty
-
-        # 计算有效性（向量化）
-        pb = np.array([[yt_before[r] for r in ind] for ind in population])
-        pa = np.array([[yt_after_batch[ind_idx][r] for r in ind] for ind_idx, ind in enumerate(population)])
-        gains = (pa - pb) / np.clip(1.0 - pb, 1e-6, None)
-        effectiveness = gains.mean(axis=1)
-
-        # 计算适应性（向量化）
-        history_start = max(0, time_step - self.problem.history_window)
-        history_res = self.problem.topk_indices[batch_idx, history_start:time_step].flatten().tolist()
-        history_scores = self.problem.original_ans[batch_idx, history_start:time_step].flatten().tolist()
-        diffs = np.array([resource_diff.get(r, 1.0) for r in history_res])
-        delta = np.sum(diffs * history_scores) / (np.sum(history_scores) + 1e-6)
-
-        adaptivity = []
-        for ind in population:
-            diff_r = np.array([resource_diff.get(r, 1.0) for r in ind])
-            adaptivity.append(np.mean(1 - np.abs(delta - diff_r)))
-        adaptivity = np.array(adaptivity)
-
-        # 计算多样性（批量处理）
-        diversity = []
-        for ind in population:
-            if len(ind) < 2:
-                diversity.append(0.0)
-                continue
-            embs = self.problem.resource_embeddings[ind]
-            sim_matrix = cosine_similarity(embs)
-            diversity.append(1 - sim_matrix[np.triu_indices_from(sim_matrix, k=1)].mean())
-        diversity = np.array(diversity)
-
-        # 计算准确率（向量化）
-        flat_index = batch_idx * (self.problem.seq_len - 1) + time_step
-        resource_probs = self.problem.pred_probs[flat_index]
-        accuracy = np.array(
-            [np.mean([resource_probs[r] for r in ind if r < len(resource_probs)]) for ind in population])
-
-        return np.column_stack([effectiveness, adaptivity, diversity, accuracy])
-
     def batch_simulate(self, batch_idx, time_step, batch_recommended):
         """批量模拟知识状态"""
         # 获取当前知识状态（共享初始状态）
@@ -586,7 +539,7 @@ class NSGA2Optimizer:
 
             # 生成模拟答案（基于预测概率）
             answer_seq = self.problem.anslist[batch_idx][:time_step + 1]
-            current_probs = current_states[batch_idx, time_step, recommended].cpu().numpy()
+            current_probs = self.problem.yt_before[batch_idx, time_step, recommended].cpu().numpy()
             answer_seq += [1 if prob > 0.5 else 0 for prob in current_probs]
             answer_seqs.append(torch.FloatTensor(answer_seq))
 
