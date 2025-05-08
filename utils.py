@@ -92,7 +92,7 @@ def simulate_learning(kt_model, original_seqs, original_ans, topk_sequence, grap
     return torch.stack(yt_after_list, dim=1)  # 维度: [batch_size, seq_len-1, num_skills]
 
 
-def gain_test_epoch(model, kt_model, test_data, graph, hypergraph_list, kt_loss, data_path, k_list=[5, 10, 20], topnum=6, cannum = 22):
+def gain_test_epoch(model, kt_model, test_data, graph, hypergraph_list, kt_loss, data_path, k_list=[5, 10, 20], topnum=6, cannum = 14):
     model.eval()# 将模型设置为评估模式
     auc_test, acc_test = [], []
     scores = {'hits@' + str(k): 0.0 for k in k_list}
@@ -174,23 +174,34 @@ def gain_test_epoch(model, kt_model, test_data, graph, hypergraph_list, kt_loss,
             total_valid_count += 1
             result = metric.combined_metrics(yt_before, yt_after, topk_sequence, original_seqs, hidden,
                              data_path, batch_size, seq_len, topnum, T=10)
-            opti_data = RecommendationProblem(kt_model,yt_before, yt_after, original_seqs,original_ans,graph , topk_sequence, topk_indices,candidate_seq, data_path, hidden,batch_size, seq_len, topnum)
+            opti_data = RecommendationProblem(kt_model,yt_before, yt_after, original_seqs,original_ans,graph
+                                              , topk_sequence, topk_indices,candidate_seq
+                                              , data_path, hidden,batch_size, seq_len, topnum, pred)
             # 运行优化
             # 测试优化器
-            optimizer = NSGA2Optimizer(opti_data, 30)
+            optimizer = NSGA2Optimizer(opti_data, 6)
             # 运行 NSGA-II 优化
-            all_fronts = optimizer.run(
-                max_generations=30,  # 最大代数
+            best_solutions = optimizer.run(
+                max_generations=20,  # 最大代数
                 convergence_thresh=0.05,  # 收敛阈值
-                population_size=50  # 种群大小
+                population_size=30  # 种群大小
             )
 
             # 输出结果
-            for (b, t), front in all_fronts.items():
-                print(f"Pareto 前沿 for batch {b}, time_step {t}:")
-                for ind in front:
-                    fitness = optimizer.evaluate_individual(ind, b, t)
-                    print(f"  Individual: {ind}, Fitness: {fitness}")
+            valid_fitness = []
+            for (b, t), (ind, fit, _) in best_solutions.items():
+                if fit is not None:  # 排除 None 值
+                    valid_fitness.append(fit)
+
+            if valid_fitness:
+                avg_fitness = np.mean(valid_fitness, axis=0)
+                print("\nAverage values of all optimal paths' indicators:")
+                print(f"Effectiveness: {avg_fitness[0]:.4f}")
+                print(f"Adaptivity: {avg_fitness[1]:.4f}")
+                print(f"Diversity: {avg_fitness[2]:.4f}")
+                print(f"interest: {avg_fitness[3]:.4f}")
+            else:
+                print("\nNo valid fitness values to compute average.")
             # 累加指标值
             total_metrics['effectiveness'] += result['effectiveness']
             total_metrics['adaptivity'] += result['adaptivity']
