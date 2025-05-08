@@ -180,7 +180,7 @@ def gain_test_epoch(model, kt_model, test_data, graph, hypergraph_list, kt_loss,
             optimizer = NSGA2Optimizer(opti_data, 50)
             # 运行 NSGA-II 优化
             all_fronts = optimizer.run(
-                max_generations=50,  # 最大代数
+                max_generations=30,  # 最大代数
                 convergence_thresh=0.05,  # 收敛阈值
                 population_size=50  # 种群大小
             )
