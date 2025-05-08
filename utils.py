@@ -6,10 +6,30 @@ from dataLoader import Split_data, DataLoader
 from Metrics import Metrics, KTLoss
 from HGAT import MSHGAT, KTOnlyModel
 from Optim import ScheduledOptim
+from Optimizer import RecommendationProblem, NSGA2Optimizer
 
 # 初始化一个Metrics类的实例，用于后续的指标计算
 metric = Metrics()
 
+def generate_candidate_seq(y_pred, batch_size, seq_len, topnum, cannum):
+    total_samples = batch_size * (seq_len - 1)
+    candidate_seq = np.zeros((batch_size, seq_len - 1, cannum), dtype=int)
+
+    for i in range(total_samples):
+        p_ = y_pred[i]
+        p_sort = p_.argsort()
+        topk = p_sort[-topnum:][::-1]
+
+        all_indices = np.arange(len(p_))
+        remaining_indices = np.setdiff1d(all_indices, topk)
+
+        selected_indices = np.random.choice(remaining_indices, cannum, replace=False)
+
+        b = i // (seq_len - 1)
+        s = i % (seq_len - 1)
+        candidate_seq[b, s] = selected_indices
+
+    return candidate_seq
 
 def simulate_learning(kt_model, original_seqs, original_ans, topk_sequence, graph, yt_before, batch_size, K):
     """
@@ -38,7 +58,7 @@ def simulate_learning(kt_model, original_seqs, original_ans, topk_sequence, grap
 
             extended_inputs.append(new_seq)# 将新序列添加到扩展输入列表中 [insert_pos + K]
 
-            pred_answers = (yt_before[b, t, recommended] >= 0.5).float().tolist() # 基于yt_before的当前时间步t生成预测答案
+            pred_answers = (yt_before[b, t, recommended] >= 0).float().tolist() # 基于yt_before的当前时间步t生成预测答案
             new_ans = original_an[:insert_pos] + pred_answers # 构建答案序列，前t+1个位置为原始序列答案，推荐位置为预测答案
             extended_ans.append(new_ans)# 将新答案序列添加到扩展答案列表中# [insert_pos + K]
 
@@ -72,7 +92,7 @@ def simulate_learning(kt_model, original_seqs, original_ans, topk_sequence, grap
     return torch.stack(yt_after_list, dim=1)  # 维度: [batch_size, seq_len-1, num_skills]
 
 
-def gain_test_epoch(model, kt_model, test_data, graph, hypergraph_list, kt_loss, data_path, k_list=[5, 10, 20], topnum=2):
+def gain_test_epoch(model, kt_model, test_data, graph, hypergraph_list, kt_loss, data_path, k_list=[5, 10, 20], topnum=8, cannum = 22):
     model.eval()# 将模型设置为评估模式
     auc_test, acc_test = [], []
     scores = {'hits@' + str(k): 0.0 for k in k_list}
@@ -116,6 +136,8 @@ def gain_test_epoch(model, kt_model, test_data, graph, hypergraph_list, kt_loss,
             scores_batch, topk_sequence, scores_len = metric.gaintest_compute_metric(
                 y_pred, y_gold, batch_size, seq_len, k_list, topnum
             )
+            candidate_seq = generate_candidate_seq(y_pred, batch_size, seq_len, topnum, cannum)
+
             # 累加有效的样本数
             total_valid_samples += scores_len
 
@@ -152,6 +174,23 @@ def gain_test_epoch(model, kt_model, test_data, graph, hypergraph_list, kt_loss,
             total_valid_count += 1
             result = metric.combined_metrics(yt_before, yt_after, topk_sequence, original_seqs, hidden,
                              data_path, batch_size, seq_len, topnum, T=10)
+            opti_data = RecommendationProblem(kt_model,yt_before, yt_after, original_seqs,original_ans,graph , topk_sequence, topk_indices,candidate_seq, data_path, hidden,batch_size, seq_len, topnum)
+            # 运行优化
+            # 测试优化器
+            optimizer = NSGA2Optimizer(opti_data, 50)
+            # 运行 NSGA-II 优化
+            all_fronts = optimizer.run(
+                max_generations=50,  # 最大代数
+                convergence_thresh=0.05,  # 收敛阈值
+                population_size=50  # 种群大小
+            )
+
+            # 输出结果
+            for (b, t), front in all_fronts.items():
+                print(f"Pareto 前沿 for batch {b}, time_step {t}:")
+                for ind in front:
+                    fitness = optimizer.evaluate_individual(ind, b, t)
+                    print(f"  Individual: {ind}, Fitness: {fitness}")
             # 累加指标值
             total_metrics['effectiveness'] += result['effectiveness']
             total_metrics['adaptivity'] += result['adaptivity']
