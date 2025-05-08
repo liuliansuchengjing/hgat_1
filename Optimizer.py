@@ -212,7 +212,8 @@ class NSGA2Optimizer:
         history_start = max(0, time_step - self.problem.history_window)
         # 使用 Tensor 索引并展平
 
-        history_resources = self.problem.topk_indices[batch_idx, history_start:time_step].flatten().tolist()
+        history_resources = self.problem.original_seqs[batch_idx][history_start:time_step]
+        # history_resources = self.problem.topk_indices[batch_idx, history_start:time_step].flatten().tolist()
         history_scores = self.problem.original_ans[batch_idx, history_start:time_step].flatten().tolist()
         diffs = [self.problem.resource_difficulty.get(r, 1) for r in history_resources]
 
@@ -493,7 +494,7 @@ class NSGA2Optimizer:
 
         # 计算适应性（向量化）
         history_start = max(0, time_step - self.problem.history_window)
-        history_res = self.problem.topk_indices[batch_idx, history_start:time_step].flatten().tolist()
+        history_res = self.problem.original_seqs[batch_idx][history_start:time_step]
         history_scores = self.problem.original_ans[batch_idx, history_start:time_step].flatten().tolist()
         diffs = np.array([resource_diff.get(r, 1.0) for r in history_res])
         delta = np.sum(diffs * history_scores) / (np.sum(history_scores) + 1e-6)
@@ -577,7 +578,7 @@ class NSGA2Optimizer:
         for b in range(batch_size):
             for t in range(seq_len):
                 history_start = max(0, t - history_window)
-                history_resources = self.problem.topk_sequence[b, history_start:t].flatten()
+                history_resources = self.problem.original_seqs[b][history_start:t]
                 history_scores = self.problem.original_ans[b, history_start:t].flatten()
                 diffs = torch.tensor([self.problem.resource_difficulty.get(r, 1.0) for r in history_resources])
                 weighted_sum = torch.sum(diffs * history_scores)
