@@ -177,7 +177,7 @@ def gain_test_epoch(model, kt_model, test_data, graph, hypergraph_list, kt_loss,
             opti_data = RecommendationProblem(kt_model,yt_before, yt_after, original_seqs,original_ans,graph , topk_sequence, topk_indices,candidate_seq, data_path, hidden,batch_size, seq_len, topnum)
             # 运行优化
             # 测试优化器
-            optimizer = NSGA2Optimizer(opti_data, 50)
+            optimizer = NSGA2Optimizer(opti_data, 30)
             # 运行 NSGA-II 优化
             all_fronts = optimizer.run(
                 max_generations=30,  # 最大代数
