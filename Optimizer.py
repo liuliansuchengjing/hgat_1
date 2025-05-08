@@ -13,7 +13,7 @@ import json
 # 核心数据结构定义
 class RecommendationProblem:
     def __init__(self, kt_model, yt_before, yt_after, original_seqs,original_ans,graph , topk_sequence, topk_indices, candidate_seq,
-                 dataname, resource_embeddings, batch_size, seq_len, topnum, history_window=3):
+                 dataname, resource_embeddings, batch_size, seq_len, topnum, pred_probs, history_window=5):
         """
         :param yt_before: 原始知识状态 [batch_size, seq_len-1, num_skills]
         :param yt_after: 原始推荐后的知识状态 [batch_size, seq_len-1, num_skills]
@@ -42,6 +42,7 @@ class RecommendationProblem:
         self.original_ans = original_ans
         self.original_seqs = original_seqs
         self.graph = graph
+        self.pred_probs = torch.sigmoid(pred_probs).cpu().numpy() if pred_probs is not None else None
 
     def load_difficulty_dict(self, data_name):
         options = Options(data_name)
@@ -99,7 +100,7 @@ class RecommendationProblem:
                 continue
 
             # 默认难度设为2（中等）
-            difficulty_dict[idx] = difficulty_data.get(original_id, 2)
+            difficulty_dict[idx] = difficulty_data.get(original_id, 1)
 
         return difficulty_dict
 
@@ -163,8 +164,11 @@ class NSGA2Optimizer:
         # 3. 多样性计算
         diversity = self.calculate_diversity(individual)
 
-        assert len([effectiveness, adaptivity, diversity]) == 3, "必须返回三个目标值"
-        return [effectiveness, adaptivity, diversity]
+        # 4. 新增：准确率计算
+        accuracy = self.calculate_accuracy(batch_idx, time_step, individual)
+
+        assert len([effectiveness, adaptivity, diversity, accuracy]) == 4, "必须返回四个目标值"
+        return [effectiveness, adaptivity, diversity, accuracy]
 
     def simulate_learning(self, batch_idx, time_step, recommended):
         """使用KT模型进行精确模拟"""
@@ -233,6 +237,22 @@ class NSGA2Optimizer:
         sim_matrix = cosine_similarity(embs)
         return float(1 - sim_matrix[np.triu_indices_from(sim_matrix, k=1)].mean())
 
+    def calculate_accuracy(self, batch_idx, time_step, recommended):
+        """计算推荐资源的平均预测准确率"""
+        if self.problem.pred_probs is None:
+            return 0.0  # 若无预测数据，返回默认值
+
+        # 获取当前batch和time_step对应的预测概率
+        flat_index = batch_idx * (self.problem.seq_len - 1) + time_step
+        resource_probs = self.problem.pred_probs[flat_index]  # 形状: [num_resources]
+
+        # 计算推荐资源的平均概率
+        acc_sum = 0.0
+        for r in recommended:
+            if r < len(resource_probs):
+                acc_sum += resource_probs[r]
+        return acc_sum / len(recommended) if len(recommended) > 0 else 0.0
+
     # 遗传操作实现
     def crossover(self, parent1, parent2, batch_idx, time_step):
         if np.random.rand() > self.crossover_prob:
@@ -269,6 +289,8 @@ class NSGA2Optimizer:
         """为每个 (batch, time_step) 运行独立优化"""
         all_populations = self.initialize_population(population_size)
         all_fronts = {}
+        best_solutions = {}  # 存储每个 (b, t) 的最佳解
+        weights = [0.3, 0.2, 0.2, 0.3]  # 对应 [ effectiveness, adaptivity, diversity, interest]
 
         for (b, t) in all_populations:
             if self.problem.original_seqs[b][t] == Constants.PAD:
@@ -304,11 +326,26 @@ class NSGA2Optimizer:
                         break
                     front_history.append(current_front_fitness)
 
+            pareto_front = self.get_pareto_front(population, b, t)
             # 存储当前 (batch, time_step) 的 Pareto 前沿
-            all_fronts[(b, t)] = self.get_pareto_front(population, b, t)
+            all_fronts[(b, t)] = pareto_front
+            # 从 Pareto 前沿中选择指标和最大的个体
+            if pareto_front:
+                pareto_fitness = [self.evaluate_individual(ind, b, t) for ind in pareto_front]
+                # 计算每个个体的指标和
+                weights_array = np.array(weights)
+                fitness_sums = np.sum(pareto_fitness * weights_array, axis=1)
+                # 找到指标和最大的个体
+                best_idx = np.argmax(fitness_sums)
+                best_individual = pareto_front[best_idx]
+                best_fitness = pareto_fitness[best_idx]
+                best_sum = fitness_sums[best_idx]
+                best_solutions[(b, t)] = (best_individual, best_fitness, best_sum)
+            else:
+                best_solutions[(b, t)] = (None, None, 0.0)
 
         # 返回所有 (batch, time_step) 的 Pareto 前沿
-        return all_fronts
+        return best_solutions
 
     def check_convergence(self, history, current_front_fitness, threshold):
         """检查 Pareto 前沿的收敛性"""
@@ -360,7 +397,7 @@ class NSGA2Optimizer:
 
         for front in fronts:
             # 按每个目标维度排序
-            for m in range(3):  # 三个目标维度
+            for m in range(4):  # 四个目标维度
                 sorted_front = sorted(front, key=lambda x: fitness[x][m])
 
                 # 边界个体距离设为无穷大
@@ -374,9 +411,8 @@ class NSGA2Optimizer:
 
                 for i in range(1, len(sorted_front) - 1):
                     crowd_dist[sorted_front[i]] += (
-                                                           fitness[sorted_front[i + 1]][m] -
-                                                           fitness[sorted_front[i - 1]][m]
-                                                   ) / (f_max - f_min)
+                    fitness[sorted_front[i + 1]][m] - fitness[sorted_front[i - 1]][m]) \
+                                                   / (f_max - f_min)
 
         return crowd_dist
 
