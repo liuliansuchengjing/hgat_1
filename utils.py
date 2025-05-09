@@ -159,18 +159,18 @@ def gain_test_epoch(model, kt_model, test_data, graph, hypergraph_list, kt_loss,
                 kt_model, original_seqs, original_ans, topk_sequence, graph, yt_before, batch_size, topnum
             )  # 维度: [batch_size, seq_len-1, num_skills]
 
-            # # 计算有效性（仅当前时间步）
-            # batch_gain = metric.compute_effectiveness(original_seqs,
-            #     yt_before,  # [batch_size, seq_len-1, num_skills]
-            #     yt_after,  # [batch_size, seq_len-1, num_skills]
-            #     topk_indices  # [batch_size, seq_len-1, topnum]
-            # )
-            # # 累加有效性指标
-            # total_gain += batch_gain
-            # batch_adaptivity = metric.calculate_adaptivity(original_seqs, topk_sequence, data_path)
-            # total_diff += batch_adaptivity
-            # batch_diversity = metric.calculate_diversity(original_seqs,topk_indices, hidden, batch_size, seq_len, topnum)
-            # total_div += batch_diversity
+            # 计算有效性（仅当前时间步）
+            batch_gain = metric.compute_effectiveness(original_seqs,
+                yt_before,  # [batch_size, seq_len-1, num_skills]
+                yt_after,  # [batch_size, seq_len-1, num_skills]
+                topk_indices  # [batch_size, seq_len-1, topnum]
+            )
+            # 累加有效性指标
+            total_gain += batch_gain
+            batch_adaptivity = metric.calculate_adaptivity(original_seqs, topk_sequence, data_path)
+            total_diff += batch_adaptivity
+            batch_diversity = metric.calculate_diversity(original_seqs,topk_indices, hidden, batch_size, seq_len, topnum)
+            total_div += batch_diversity
             # 累加有效的批次数量
             total_valid_count += 1
             pred_probs = torch.sigmoid(pred).cpu().numpy() if pred is not None else None
@@ -199,10 +199,10 @@ def gain_test_epoch(model, kt_model, test_data, graph, hypergraph_list, kt_loss,
                 avg_fitness = np.mean(valid_fitness, axis=0)
                 print("\nAverage values of all optimal paths' indicators:")
                 print(f"interest: {avg_fitness[0]:.4f}")
-                print(f"Adaptivity: {avg_fitness[1]:.4f}")                
-                print(f"Effectiveness: {avg_fitness[2]:.4f}")                
+                print(f"Adaptivity: {avg_fitness[1]:.4f}")
+                print(f"Effectiveness: {avg_fitness[2]:.4f}")
                 print(f"Diversity: {avg_fitness[3]:.4f}")
-                
+
             else:
                 print("\nNo valid fitness values to compute average.")
             # 累加指标值
