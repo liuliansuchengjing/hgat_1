@@ -175,7 +175,7 @@ def gain_test_epoch(model, kt_model, test_data, graph, hypergraph_list, kt_loss,
             total_valid_count += 1
             pred_probs = torch.sigmoid(pred).cpu().numpy() if pred is not None else None
             result = metric.combined_metrics(yt_before, yt_after, topk_sequence, original_seqs, hidden,
-                             data_path, batch_size, seq_len, pred_probs, topnum, T=5)
+                             data_path, batch_size, seq_len, pred_probs, topnum, 5)
             opti_data = RecommendationProblem(kt_model,yt_before, yt_after, original_seqs,original_ans,graph
                                               , topk_sequence, topk_indices,candidate_seq
                                               , data_path, hidden,batch_size, seq_len, topnum, pred)
