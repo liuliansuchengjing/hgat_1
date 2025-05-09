@@ -327,7 +327,7 @@ class Metrics(object):
         return total_diversity / valid_pairs if valid_pairs > 0 else 0.0
 
     def combined_metrics(self, yt_before, yt_after, topk_sequence, original_seqs, hidden,
-                         data_name, batch_size, seq_len, topnum=5, T=10, epsilon=1e-5):
+                         data_name, batch_size, seq_len, pred_probs, topnum=5, T=10, epsilon=1e-5):
         """
         合并后的目标函数，同时计算有效性、适应性和多样性
         输入维度说明：
@@ -342,12 +342,14 @@ class Metrics(object):
             'total_effectiveness': 0.0,
             'total_adaptivity': 0.0,
             'total_diversity': 0.0,
+            'total_preference': 0.0,
             'step_records': defaultdict(list)  # 存储每个时间步的指标
         }
         valid_count = 0
         eff_valid_count = 0
         ada_valid_count = 0
         div_valid_count = 0
+        pre_valid_count = 0
 
         # 预处理：加载难度数据和映射（移出循环）
         options = Options(data_name)
@@ -405,7 +407,7 @@ class Metrics(object):
                     continue;
                 # ========== 有效性计算 ==========
                 valid_count += 1
-                valid_rec = [r.item() for r in recs[t] if 0 <= r < yt_before.shape[2]]
+                valid_rec = [r.item() for r in recs[t] if 0 < r < yt_before.shape[2]]
                 if valid_rec:
 
                     pb = yt_before[b, t, valid_rec]  # [K]
@@ -439,14 +441,15 @@ class Metrics(object):
                             try:
                                 rec_diff = difficulty_data[int(idx2u[rec.item()])]
                                 adapt = 1 - abs(delta - rec_diff)
-                                dif_valid += 1
-                                adapt_sum += adapt
+                                ada_valid_count += 1
+                                metrics['total_adaptivity'] += adapt
 
                             except KeyError:
                                 pass
-                    metrics['total_adaptivity'] += adapt
-                    metrics['step_records'][(b, t)].append(adapt)
-                    ada_valid_count += 1
+                    # if dif_valid > 0:
+                    #   metrics['total_adaptivity'] += (adapt_sum/dif_valid)
+                    #   metrics['step_records'][(b, t)].append(adapt)
+                    #   ada_valid_count += 1                    
 
                 # ========== 多样性计算 ==========
                 current_embs = hidden[recs[t]]  # [topnum, emb_dim]
@@ -465,18 +468,54 @@ class Metrics(object):
 
                 if pair_count > 0:
                     div_valid_count += 1
-                    metrics['total_diversity'] += div_sum / pair_count
+                    metrics['total_diversity'] += (div_sum / pair_count)
                     metrics['step_records'][(b, t)].append(div_sum / pair_count)
+
+                # ========== 喜好计算 ==========
+                # 获取当前batch和time_step对应的预测概率
+                flat_index = b * (seq_len - 1) + t
+                resource_probs = pred_probs[flat_index]  # 形状: [num_resources]
+
+                # 计算推荐资源的平均概率
+                prefer_sum = 0.0
+                pre_num = 0
+                for r in valid_rec:
+                    if r < len(resource_probs):
+                        metrics['total_preference'] += resource_probs[r]
+                        pre_valid_count += 1
+                        
+                # if pre_num != 0:
+                #   metrics['total_adaptivity'] += (prefer_sum/pre_num)
+                #   pre_valid_count += 1              
+                        
 
                         # 计算均值
 
+        # print("total_preference:",metrics['total_preference'])
+        # print("pre_valid_count:",pre_valid_count)
         metrics.update({
             'effectiveness': metrics['total_effectiveness'] / eff_valid_count,
             'adaptivity': metrics['total_adaptivity'] / ada_valid_count,
             'diversity': metrics['total_diversity'] / div_valid_count,
+            'preference': metrics['total_preference']/pre_valid_count
         })
 
         return metrics
+
+    def compute_effectiveness_single(self, yt_before, yt_after, recommended):
+        """单时间步有效性计算，输入为numpy数组"""
+        gain = 0.0
+        valid = 0
+        for r in recommended:
+            if r >= yt_before.shape[0]:  # 过滤无效资源索引
+                continue
+            pb = yt_before[r]
+            pa = yt_after[r]
+            if pb < 0.9 and pa > 0:
+                gain += (pa - pb) / (1.0 - pb)
+                valid += 1
+        return gain / valid if valid > 0 else 0.0
+
 # Calculate accuracy of prediction result and its corresponding label
 # output: tensor, labels: tensor
 def accuracy(output, labels):
@@ -510,6 +549,7 @@ class KTLoss(nn.Module):
         loss = valid_loss.sum() / answer_mask.float().sum()  # 仅对有效位置求平均
 
         return loss, auc, acc
+
 
 
 
