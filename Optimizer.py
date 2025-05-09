@@ -153,7 +153,7 @@ class NSGA2Optimizer:
         # 输入检查
         assert len(individual) == self.problem.K, f"个体长度应为{self.problem.K}，实际{len(individual)}"
 
-        """计算单个个体的三目标值"""
+        """计算单个个体的四目标值"""
         # 1. 有效性计算（增量模拟）
         yt_after = self.simulate_learning(batch_idx, time_step, individual)
         effectiveness = self.calculate_effectiveness(batch_idx, time_step, individual, yt_after)
@@ -161,14 +161,16 @@ class NSGA2Optimizer:
         # 2. 适应性计算
         adaptivity = self.calculate_adaptivity(batch_idx, time_step, individual)
 
-        # 3. 多样性计算
-        diversity = self.calculate_diversity(individual)
+        # # 3. 多样性计算
+        # diversity = self.calculate_diversity(individual)
 
         # 4. 新增：准确率计算
         accuracy = self.calculate_accuracy(batch_idx, time_step, individual)
 
-        assert len([accuracy, adaptivity,  effectiveness, diversity]) == 4, "必须返回四个目标值"
-        return [accuracy, adaptivity,  effectiveness, diversity]
+        # assert len([accuracy, adaptivity,  effectiveness, diversity]) == 4, "必须返回四个目标值"
+        # return [accuracy, adaptivity,  effectiveness, diversity]
+        assert len([accuracy, adaptivity, effectiveness]) == 3, "必须返回四个目标值"
+        return [accuracy, adaptivity, effectiveness]
 
     def simulate_learning(self, batch_idx, time_step, recommended):
         """使用KT模型进行精确模拟"""
@@ -291,7 +293,8 @@ class NSGA2Optimizer:
         all_populations = self.initialize_population(population_size)
         all_fronts = {}
         best_solutions = {}  # 存储每个 (b, t) 的最佳解
-        weights = [0.5, 0.3, 0.1, 0.1]  # 对应 [ interest, adaptivity, effectiveness, diversity][0.3, 0.3, 0.2, 0.2][0.3, 0.4, 0.2, 0.1]
+        # weights = [0.5, 0.3, 0.1, 0.1]  # 对应 [ interest, adaptivity, effectiveness, diversity][0.3, 0.3, 0.2, 0.2][0.3, 0.4, 0.2, 0.1]
+        weights = [0.5, 0.3, 0.2]
 
         for (b, t) in all_populations:
             if self.problem.original_seqs[b][t] == Constants.PAD:
