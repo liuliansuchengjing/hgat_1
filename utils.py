@@ -106,8 +106,8 @@ def gain_test_epoch(model, kt_model, test_data, graph, hypergraph_list, kt_loss,
     total_metrics = {
         'effectiveness': 0.0,
         'adaptivity': 0.0,
-        'diversity': 0.0,
-        'preference': 0.0
+        'diversity': 0.0
+        # ,'preference': 0.0
     }
 
     with torch.no_grad():    # 不进行梯度计算
@@ -201,15 +201,16 @@ def gain_test_epoch(model, kt_model, test_data, graph, hypergraph_list, kt_loss,
                 print(f"interest: {avg_fitness[0]:.4f}")
                 print(f"Adaptivity: {avg_fitness[1]:.4f}")
                 print(f"Effectiveness: {avg_fitness[2]:.4f}")
-                print(f"Diversity: {avg_fitness[3]:.4f}")
+                # print(f"Diversity: {avg_fitness[3]:.4f}")
 
             else:
                 print("\nNo valid fitness values to compute average.")
             # 累加指标值
-            total_metrics['effectiveness'] += result['effectiveness']
+            total_metrics['preference'] += result['preference']
             total_metrics['adaptivity'] += result['adaptivity']
-            total_metrics['diversity'] += result['diversity']
-            total_metrics['preference'] +=result['preference']
+            total_metrics['effectiveness'] += result['effectiveness']
+            # total_metrics['diversity'] += result['diversity']
+
 
     # 计算全局均值
     for k in k_list:
@@ -278,7 +279,8 @@ def gain_test_model(model, data_path, opt):
     print(f'Effectiveness (E_p): {E_p:.4f}')
     print(f'Adaptivity : {Adaptivity:.4f}')
     print(f'Diversity :{Diversity:.4f}')
-    print(f"全局有效性: {final_metrics['effectiveness']:.4f}")
-    print(f"全局适应性: {final_metrics['adaptivity']:.4f}")
-    print(f"全局多样性: {final_metrics['diversity']:.4f}")
     print(f"全局准确性: {final_metrics['preference']:.4f}")
+    print(f"全局适应性: {final_metrics['adaptivity']:.4f}")
+    print(f"全局有效性: {final_metrics['effectiveness']:.4f}")
+    # print(f"全局多样性: {final_metrics['diversity']:.4f}")
+
