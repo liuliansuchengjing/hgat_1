@@ -106,7 +106,8 @@ def gain_test_epoch(model, kt_model, test_data, graph, hypergraph_list, kt_loss,
     total_metrics = {
         'effectiveness': 0.0,
         'adaptivity': 0.0,
-        'diversity': 0.0
+        'diversity': 0.0,
+        'preference': 0.0
     }
 
     with torch.no_grad():    # 不进行梯度计算
@@ -158,22 +159,23 @@ def gain_test_epoch(model, kt_model, test_data, graph, hypergraph_list, kt_loss,
                 kt_model, original_seqs, original_ans, topk_sequence, graph, yt_before, batch_size, topnum
             )  # 维度: [batch_size, seq_len-1, num_skills]
 
-            # 计算有效性（仅当前时间步）
-            batch_gain = metric.compute_effectiveness(original_seqs,
-                yt_before,  # [batch_size, seq_len-1, num_skills]
-                yt_after,  # [batch_size, seq_len-1, num_skills]
-                topk_indices  # [batch_size, seq_len-1, topnum]
-            )
-            # 累加有效性指标
-            total_gain += batch_gain
-            batch_adaptivity = metric.calculate_adaptivity(original_seqs, topk_sequence, data_path)
-            total_diff += batch_adaptivity
-            batch_diversity = metric.calculate_diversity(original_seqs,topk_indices, hidden, batch_size, seq_len, topnum)
-            total_div += batch_diversity
+            # # 计算有效性（仅当前时间步）
+            # batch_gain = metric.compute_effectiveness(original_seqs,
+            #     yt_before,  # [batch_size, seq_len-1, num_skills]
+            #     yt_after,  # [batch_size, seq_len-1, num_skills]
+            #     topk_indices  # [batch_size, seq_len-1, topnum]
+            # )
+            # # 累加有效性指标
+            # total_gain += batch_gain
+            # batch_adaptivity = metric.calculate_adaptivity(original_seqs, topk_sequence, data_path)
+            # total_diff += batch_adaptivity
+            # batch_diversity = metric.calculate_diversity(original_seqs,topk_indices, hidden, batch_size, seq_len, topnum)
+            # total_div += batch_diversity
             # 累加有效的批次数量
             total_valid_count += 1
+            pred_probs = torch.sigmoid(pred).cpu().numpy() if pred is not None else None
             result = metric.combined_metrics(yt_before, yt_after, topk_sequence, original_seqs, hidden,
-                             data_path, batch_size, seq_len, topnum, T=10)
+                             data_path, batch_size, seq_len, pred_probs, topnum, T=5)
             opti_data = RecommendationProblem(kt_model,yt_before, yt_after, original_seqs,original_ans,graph
                                               , topk_sequence, topk_indices,candidate_seq
                                               , data_path, hidden,batch_size, seq_len, topnum, pred)
@@ -196,16 +198,18 @@ def gain_test_epoch(model, kt_model, test_data, graph, hypergraph_list, kt_loss,
             if valid_fitness:
                 avg_fitness = np.mean(valid_fitness, axis=0)
                 print("\nAverage values of all optimal paths' indicators:")
-                print(f"Effectiveness: {avg_fitness[0]:.4f}")
-                print(f"Adaptivity: {avg_fitness[1]:.4f}")
-                print(f"Diversity: {avg_fitness[2]:.4f}")
-                print(f"interest: {avg_fitness[3]:.4f}")
+                print(f"interest: {avg_fitness[0]:.4f}")
+                print(f"Adaptivity: {avg_fitness[1]:.4f}")                
+                print(f"Effectiveness: {avg_fitness[2]:.4f}")                
+                print(f"Diversity: {avg_fitness[3]:.4f}")
+                
             else:
                 print("\nNo valid fitness values to compute average.")
             # 累加指标值
             total_metrics['effectiveness'] += result['effectiveness']
             total_metrics['adaptivity'] += result['adaptivity']
             total_metrics['diversity'] += result['diversity']
+            total_metrics['preference'] +=result['preference']
 
     # 计算全局均值
     for k in k_list:
@@ -220,6 +224,8 @@ def gain_test_epoch(model, kt_model, test_data, graph, hypergraph_list, kt_loss,
     E_p = total_gain / total_valid_count if total_valid_count > 0 else 0.0
     Adaptivity = total_diff / total_valid_count if total_valid_count > 0 else 0.0
     Diversity = total_div / total_valid_count if total_valid_count > 0 else 0.0
+    # Preference = total_div / total_valid_count if total_valid_count > 0 else 0.0
+
     # 计算全局平均值
     final_metrics = {
         k: v / total_valid_count
@@ -275,3 +281,4 @@ def gain_test_model(model, data_path, opt):
     print(f"全局有效性: {final_metrics['effectiveness']:.4f}")
     print(f"全局适应性: {final_metrics['adaptivity']:.4f}")
     print(f"全局多样性: {final_metrics['diversity']:.4f}")
+    print(f"全局准确性: {final_metrics['preference']:.4f}")
