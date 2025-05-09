@@ -167,8 +167,8 @@ class NSGA2Optimizer:
         # 4. 新增：准确率计算
         accuracy = self.calculate_accuracy(batch_idx, time_step, individual)
 
-        assert len([effectiveness, adaptivity, diversity, accuracy]) == 4, "必须返回四个目标值"
-        return [effectiveness, adaptivity, diversity, accuracy]
+        assert len([accuracy, adaptivity,  effectiveness, diversity]) == 4, "必须返回四个目标值"
+        return [accuracy, adaptivity,  effectiveness, diversity]
 
     def simulate_learning(self, batch_idx, time_step, recommended):
         """使用KT模型进行精确模拟"""
@@ -291,7 +291,7 @@ class NSGA2Optimizer:
         all_populations = self.initialize_population(population_size)
         all_fronts = {}
         best_solutions = {}  # 存储每个 (b, t) 的最佳解
-        weights = [0.4, 0.2, 0.1, 0.3]  # 对应 [ effectiveness, adaptivity, diversity, interest]
+        weights = [0.5, 0.3, 0.1, 0.1]  # 对应 [ interest, effectiveness, adaptivity, diversity][0.3, 0.3, 0.2, 0.2][0.3, 0.4, 0.2, 0.1]
 
         for (b, t) in all_populations:
             if self.problem.original_seqs[b][t] == Constants.PAD:
