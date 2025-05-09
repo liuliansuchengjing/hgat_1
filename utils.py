@@ -104,10 +104,10 @@ def gain_test_epoch(model, kt_model, test_data, graph, hypergraph_list, kt_loss,
     total_valid_count = 0     # 有效的批次数量
     # 训练/验证循环外部初始化累加器
     total_metrics = {
-        'effectiveness': 0.0,
+        'preference': 0.0,
         'adaptivity': 0.0,
-        'diversity': 0.0
-        # ,'preference': 0.0
+        'effectiveness': 0.0
+        # ,'diversity': 0.0
     }
 
     with torch.no_grad():    # 不进行梯度计算
