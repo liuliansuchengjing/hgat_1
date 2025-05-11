@@ -92,7 +92,7 @@ def simulate_learning(kt_model, original_seqs, original_ans, topk_sequence, grap
     return torch.stack(yt_after_list, dim=1)  # 维度: [batch_size, seq_len-1, num_skills]
 
 
-def gain_test_epoch(model, kt_model, test_data, graph, hypergraph_list, kt_loss, data_path, k_list=[5, 10, 20], topnum=6, cannum = 14):
+def gain_test_epoch(model, kt_model, test_data, graph, hypergraph_list, kt_loss, data_path, k_list=[5, 10, 20], topnum=20, cannum = 14):
     model.eval()# 将模型设置为评估模式
     auc_test, acc_test = [], []
     scores = {'hits@' + str(k): 0.0 for k in k_list}
@@ -101,13 +101,14 @@ def gain_test_epoch(model, kt_model, test_data, graph, hypergraph_list, kt_loss,
     total_gain = 0.0    # 有效性指标的累积值
     total_diff = 0.0
     total_div = 0.0
+    total_per = 0.0
     total_valid_count = 0     # 有效的批次数量
     # 训练/验证循环外部初始化累加器
     total_metrics = {
         'preference': 0.0,
         'adaptivity': 0.0,
         'effectiveness': 0.0
-        # ,'diversity': 0.0
+        ,'diversity': 0.0
     }
 
     with torch.no_grad():    # 不进行梯度计算
@@ -176,40 +177,40 @@ def gain_test_epoch(model, kt_model, test_data, graph, hypergraph_list, kt_loss,
             pred_probs = torch.sigmoid(pred).cpu().numpy() if pred is not None else None
             result = metric.combined_metrics(yt_before, yt_after, topk_sequence, original_seqs, hidden,
                              data_path, batch_size, seq_len, pred_probs, topnum, 5)
-            opti_data = RecommendationProblem(kt_model,yt_before, yt_after, original_seqs,original_ans,graph
-                                              , topk_sequence, topk_indices,candidate_seq
-                                              , data_path, hidden,batch_size, seq_len, topnum, pred)
-            # 运行优化
-            # 测试优化器
-            optimizer = NSGA2Optimizer(opti_data, 6)
-            # 运行 NSGA-II 优化
-            best_solutions = optimizer.run(
-                max_generations=20,  # 最大代数
-                convergence_thresh=0.05,  # 收敛阈值
-                population_size=30  # 种群大小
-            )
-
-            # 输出结果
-            valid_fitness = []
-            for (b, t), (ind, fit, _) in best_solutions.items():
-                if fit is not None:  # 排除 None 值
-                    valid_fitness.append(fit)
-
-            if valid_fitness:
-                avg_fitness = np.mean(valid_fitness, axis=0)
-                print("\nAverage values of all optimal paths' indicators:")
-                print(f"interest: {avg_fitness[0]:.4f}")
-                print(f"Adaptivity: {avg_fitness[1]:.4f}")
-                print(f"Effectiveness: {avg_fitness[2]:.4f}")
-                # print(f"Diversity: {avg_fitness[3]:.4f}")
-
-            else:
-                print("\nNo valid fitness values to compute average.")
+            # opti_data = RecommendationProblem(kt_model,yt_before, yt_after, original_seqs,original_ans,graph
+            #                                   , topk_sequence, topk_indices,candidate_seq
+            #                                   , data_path, hidden,batch_size, seq_len, topnum, pred)
+            # # 运行优化
+            # # 测试优化器
+            # optimizer = NSGA2Optimizer(opti_data, 6)
+            # # 运行 NSGA-II 优化
+            # best_solutions = optimizer.run(
+            #     max_generations=20,  # 最大代数
+            #     convergence_thresh=0.05,  # 收敛阈值
+            #     population_size=30  # 种群大小
+            # )
+            #
+            # # 输出结果
+            # valid_fitness = []
+            # for (b, t), (ind, fit, _) in best_solutions.items():
+            #     if fit is not None:  # 排除 None 值
+            #         valid_fitness.append(fit)
+            #
+            # if valid_fitness:
+            #     avg_fitness = np.mean(valid_fitness, axis=0)
+            #     print("\nAverage values of all optimal paths' indicators:")
+            #     print(f"interest: {avg_fitness[0]:.4f}")
+            #     print(f"Adaptivity: {avg_fitness[1]:.4f}")
+            #     print(f"Effectiveness: {avg_fitness[2]:.4f}")
+            #     print(f"Diversity: {avg_fitness[3]:.4f}")
+            #
+            # else:
+            #     print("\nNo valid fitness values to compute average.")
             # 累加指标值
             total_metrics['preference'] += result['preference']
             total_metrics['adaptivity'] += result['adaptivity']
             total_metrics['effectiveness'] += result['effectiveness']
-            # total_metrics['diversity'] += result['diversity']
+            total_metrics['diversity'] += result['diversity']
 
 
     # 计算全局均值
@@ -225,7 +226,7 @@ def gain_test_epoch(model, kt_model, test_data, graph, hypergraph_list, kt_loss,
     E_p = total_gain / total_valid_count if total_valid_count > 0 else 0.0
     Adaptivity = total_diff / total_valid_count if total_valid_count > 0 else 0.0
     Diversity = total_div / total_valid_count if total_valid_count > 0 else 0.0
-    # Preference = total_div / total_valid_count if total_valid_count > 0 else 0.0
+    Preference = total_per / total_valid_count if total_valid_count > 0 else 0.0
 
     # 计算全局平均值
     final_metrics = {
@@ -282,5 +283,4 @@ def gain_test_model(model, data_path, opt):
     print(f"全局准确性: {final_metrics['preference']:.4f}")
     print(f"全局适应性: {final_metrics['adaptivity']:.4f}")
     print(f"全局有效性: {final_metrics['effectiveness']:.4f}")
-    # print(f"全局多样性: {final_metrics['diversity']:.4f}")
-
+    print(f"全局多样性: {final_metrics['diversity']:.4f}")
