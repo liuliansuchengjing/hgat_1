@@ -11,20 +11,42 @@ from Optimizer import RecommendationProblem, NSGA2Optimizer
 # 初始化一个Metrics类的实例，用于后续的指标计算
 metric = Metrics()
 
+# def generate_candidate_seq(y_pred, batch_size, seq_len, topnum, cannum):
+#     total_samples = batch_size * (seq_len - 1)
+#     candidate_seq = np.zeros((batch_size, seq_len - 1, cannum), dtype=int)
+
+#     for i in range(total_samples):
+#         p_ = y_pred[i]
+#         p_sort = p_.argsort()
+#         topk = p_sort[-topnum:][::-1]
+
+#         all_indices = np.arange(len(p_))
+#         remaining_indices = np.setdiff1d(all_indices, topk)
+
+#         selected_indices = np.random.choice(remaining_indices, cannum, replace=False)
+
+#         b = i // (seq_len - 1)
+#         s = i % (seq_len - 1)
+#         candidate_seq[b, s] = selected_indices
+
+#     return candidate_seq
+
+import numpy as np
+
 def generate_candidate_seq(y_pred, batch_size, seq_len, topnum, cannum):
     total_samples = batch_size * (seq_len - 1)
     candidate_seq = np.zeros((batch_size, seq_len - 1, cannum), dtype=int)
 
     for i in range(total_samples):
         p_ = y_pred[i]
-        p_sort = p_.argsort()
-        topk = p_sort[-topnum:][::-1]
+        p_sort = p_.argsort()  # 获取按概率升序排列的索引
+        topk = p_sort[-topnum:][::-1]  # 取topnum个最高概率的索引（降序排列）
 
-        all_indices = np.arange(len(p_))
-        remaining_indices = np.setdiff1d(all_indices, topk)
+        # 从剩余候选中取概率最高的cannum个（按总排序取topnum+1到topnum+cannum）
+        remaining_sorted = p_sort[:-topnum][::-1]  # 排除topnum后反转得到降序排列
+        selected_indices = remaining_sorted[:cannum]  # 直接取前cannum个
 
-        selected_indices = np.random.choice(remaining_indices, cannum, replace=False)
-
+        # 计算当前batch和step位置
         b = i // (seq_len - 1)
         s = i % (seq_len - 1)
         candidate_seq[b, s] = selected_indices
@@ -177,35 +199,35 @@ def gain_test_epoch(model, kt_model, test_data, graph, hypergraph_list, kt_loss,
             pred_probs = torch.sigmoid(pred).cpu().numpy() if pred is not None else None
             result = metric.combined_metrics(yt_before, yt_after, topk_sequence, original_seqs, hidden,
                              data_path, batch_size, seq_len, pred_probs, topnum, 5)
-            # opti_data = RecommendationProblem(kt_model,yt_before, yt_after, original_seqs,original_ans,graph
-            #                                   , topk_sequence, topk_indices,candidate_seq
-            #                                   , data_path, hidden,batch_size, seq_len, topnum, pred)
-            # # 运行优化
-            # # 测试优化器
-            # optimizer = NSGA2Optimizer(opti_data, 6)
-            # # 运行 NSGA-II 优化
-            # best_solutions = optimizer.run(
-            #     max_generations=20,  # 最大代数
-            #     convergence_thresh=0.05,  # 收敛阈值
-            #     population_size=30  # 种群大小
-            # )
-            #
-            # # 输出结果
-            # valid_fitness = []
-            # for (b, t), (ind, fit, _) in best_solutions.items():
-            #     if fit is not None:  # 排除 None 值
-            #         valid_fitness.append(fit)
-            #
-            # if valid_fitness:
-            #     avg_fitness = np.mean(valid_fitness, axis=0)
-            #     print("\nAverage values of all optimal paths' indicators:")
-            #     print(f"interest: {avg_fitness[0]:.4f}")
-            #     print(f"Adaptivity: {avg_fitness[1]:.4f}")
-            #     print(f"Effectiveness: {avg_fitness[2]:.4f}")
-            #     print(f"Diversity: {avg_fitness[3]:.4f}")
-            #
-            # else:
-            #     print("\nNo valid fitness values to compute average.")
+            opti_data = RecommendationProblem(kt_model,yt_before, yt_after, original_seqs,original_ans,graph
+                                              , topk_sequence, topk_indices,candidate_seq
+                                              , data_path, hidden,batch_size, seq_len, topnum, pred)
+            # 运行优化
+            # 测试优化器
+            optimizer = NSGA2Optimizer(opti_data, 6)
+            # 运行 NSGA-II 优化
+            best_solutions = optimizer.run(
+                max_generations=20,  # 最大代数
+                convergence_thresh=0.05,  # 收敛阈值
+                population_size=30  # 种群大小
+            )
+            
+            # 输出结果
+            valid_fitness = []
+            for (b, t), (ind, fit, _) in best_solutions.items():
+                if fit is not None:  # 排除 None 值
+                    valid_fitness.append(fit)
+            
+            if valid_fitness:
+                avg_fitness = np.mean(valid_fitness, axis=0)
+                print("\nAverage values of all optimal paths' indicators:")
+                print(f"interest: {avg_fitness[0]:.4f}")
+                print(f"Adaptivity: {avg_fitness[1]:.4f}")
+                print(f"Effectiveness: {avg_fitness[2]:.4f}")
+                print(f"Diversity: {avg_fitness[3]:.4f}")
+            
+            else:
+                print("\nNo valid fitness values to compute average.")
             # 累加指标值
             total_metrics['preference'] += result['preference']
             total_metrics['adaptivity'] += result['adaptivity']
