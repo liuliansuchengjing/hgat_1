@@ -165,6 +165,8 @@ class NSGA2Optimizer:
         # 4. 多样性计算
         diversity = self.calculate_diversity(individual)
 
+        # print("[accuracy, adaptivity,  effectiveness, diversity]", [accuracy, adaptivity,  effectiveness, diversity])
+
         assert len([accuracy, adaptivity,  effectiveness, diversity]) == 4, "必须返回四个目标值"
         return [accuracy, adaptivity,  effectiveness, diversity]
         # assert len([accuracy, adaptivity, effectiveness]) == 3, "必须返回四个目标值"
@@ -246,12 +248,14 @@ class NSGA2Optimizer:
         # 获取当前batch和time_step对应的预测概率
         flat_index = batch_idx * (self.problem.seq_len - 1) + time_step
         resource_probs = self.problem.pred_probs[flat_index]  # 形状: [num_resources]
-
+        
         # 计算推荐资源的平均概率
         acc_sum = 0.0
         for r in recommended:
             if r < len(resource_probs):
                 acc_sum += resource_probs[r]
+                # print("resource_probs[r]", resource_probs[r])
+
         return acc_sum / len(recommended) if len(recommended) > 0 else 0.0
 
     # 遗传操作实现
@@ -276,7 +280,7 @@ class NSGA2Optimizer:
                       if r not in banned]
 
         for i in range(len(mutated)):
-            if i < 0.4 * len(mutated):  # 前40%低概率变异
+            if i < 0.3 * len(mutated):  # 前30%低概率变异
                 if np.random.rand() < 0.1 * (1 - i / len(mutated)):
                     if candidates:
                         mutated[i] = np.random.choice(candidates)
