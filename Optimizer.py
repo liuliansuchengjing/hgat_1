@@ -291,7 +291,7 @@ class NSGA2Optimizer:
         all_populations = self.initialize_population(population_size)
         all_fronts = {}
         best_solutions = {}  # 存储每个 (b, t) 的最佳解
-        weights = [0.3, 0.4, 0.2, 0.1]  # 对应 [ interest, adaptivity, effectiveness, diversity][0.3, 0.3, 0.2, 0.2][0.3, 0.4, 0.2, 0.1]
+        weights = [0.2, 0.3, 0.4, 0.1]  # 对应 [ interest, adaptivity, effectiveness, diversity][0.3, 0.3, 0.2, 0.2][0.3, 0.4, 0.2, 0.1]
         # weights = [0.5, 0.3, 0.2]
 
         for (b, t) in all_populations:
